@@ -1,10 +1,11 @@
+// Load .env before any other local imports read process.env (tsx/ESM order-safe).
+import 'dotenv/config';
+
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import dotenv from 'dotenv';
 import swaggerUi from 'swagger-ui-express';
 import openapiDocument from './app/swagger/openapi.json';
-dotenv.config();
 
 import routes from './app/routes/routes';
 import { requestLogger } from './app/middleware/requestLogger';

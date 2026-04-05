@@ -8,3 +8,9 @@ export function normalizePhoneForStorage(raw: string): string {
     }
     return s;
 }
+
+/** E.164 for India SMS (stored national number → +91…). */
+export function toIndiaE164(normalizedNational: string): string {
+    const digits = normalizedNational.replace(/\D/g, '');
+    return `+91${digits}`;
+}

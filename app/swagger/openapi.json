@@ -3,7 +3,7 @@
   "info": {
     "title": "HomeZ API",
     "version": "1.0.0",
-    "description": "HomeZ backend HTTP API"
+    "description": "HomeZ backend HTTP API.\n\n## Phone auth (OTP + JWT)\n\n**Register (new user)**\n1. `POST /auth/register` with `phone_number` — creates an unverified account (or resends OTP if signup was already started) and sends a **6-digit OTP** by SMS. The OTP is stored hashed in the database and expires in **10 minutes**.\n2. `POST /auth/verify` with the same `phone_number` and `otp` — validates the code, sets **is_verified** to `true`, and returns a **JWT**.\n\n**Login (verified user)**\n1. `POST /auth/login` with `phone_number` — sends a new OTP (10-minute expiry).\n2. `POST /auth/verify` with `phone_number` and `otp` — returns a **JWT**.\n\n**Single verify endpoint** — After a successful verify, the response includes `flow`: `registration` (account was unverified before this OTP) or `login` (account was already verified; this OTP was for sign-in). You can use the same client code for both.\n\nIndian numbers: you may send `phone_number` with or without a leading `+91`; `+91` is stripped before storage."
   },
   "servers": [
     {
@@ -14,14 +14,15 @@
   "tags": [
     {
       "name": "Auth",
-      "description": "Authentication"
+      "description": "OTP-based registration, login, and verify (JWT)"
     }
   ],
   "paths": {
     "/auth/register": {
       "post": {
         "tags": ["Auth"],
-        "summary": "Register a user",
+        "summary": "Start registration — sends OTP",
+        "description": "Creates an unverified user (or resends OTP). Does not return a JWT until you call verify.",
         "requestBody": {
           "required": true,
           "content": {
@@ -42,17 +43,37 @@
         },
         "responses": {
           "201": {
-            "description": "User registered",
+            "description": "New user created; OTP sent",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessUser"
+                  "$ref": "#/components/schemas/SuccessOtpSent"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Existing unverified user; OTP resent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessOtpSent"
                 }
               }
             }
           },
           "400": {
             "description": "Validation or business error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Server misconfiguration (e.g. missing OTP secret)",
             "content": {
               "application/json": {
                 "schema": {
@@ -77,7 +98,8 @@
     "/auth/login": {
       "post": {
         "tags": ["Auth"],
-        "summary": "Login with phone number",
+        "summary": "Start login — sends OTP",
+        "description": "Only for users who are already verified. Sends a new OTP; use verify to get a JWT.",
         "requestBody": {
           "required": true,
           "content": {
@@ -98,17 +120,90 @@
         },
         "responses": {
           "200": {
-            "description": "Login successful",
+            "description": "OTP sent",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessUser"
+                  "$ref": "#/components/schemas/SuccessOtpSent"
                 }
               }
             }
           },
           "400": {
             "description": "Validation or business error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Server misconfiguration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/verify": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Verify OTP — returns JWT",
+        "description": "Same endpoint after register or login. Returns `flow` so you know if this completed registration or login.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyBody"
+              },
+              "example": {
+                "phone_number": "+919876543210",
+                "otp": "123456"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OTP valid; JWT issued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessVerify"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or expired OTP, or validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Server misconfiguration (e.g. missing JWT secret)",
             "content": {
               "application/json": {
                 "schema": {
@@ -158,13 +253,30 @@
         "properties": {
           "phone_number": {
             "type": "string",
-            "description": "Indian mobile: send either with leading +91 or as a national number only; +91 is stripped before storage.",
+            "description": "Indian mobile: with or without +91; +91 is stripped before storage.",
             "example": "+919876543210"
           }
         }
       },
-      "User": {
+      "VerifyBody": {
         "type": "object",
+        "required": ["phone_number", "otp"],
+        "properties": {
+          "phone_number": {
+            "type": "string",
+            "description": "Same format as register/login."
+          },
+          "otp": {
+            "type": "string",
+            "description": "6-digit code from SMS",
+            "pattern": "^[0-9]{6}$",
+            "example": "123456"
+          }
+        }
+      },
+      "PublicUser": {
+        "type": "object",
+        "description": "User profile (no OTP fields)",
         "properties": {
           "id": { "type": "string", "format": "uuid" },
           "phone_number": { "type": "string" },
@@ -175,13 +287,41 @@
           "updated_at": { "type": "string", "format": "date-time" }
         }
       },
-      "SuccessUser": {
+      "SuccessOtpSent": {
         "type": "object",
         "properties": {
           "success": { "type": "boolean", "example": true },
           "message": { "type": "string" },
           "data": {
-            "$ref": "#/components/schemas/User"
+            "$ref": "#/components/schemas/PublicUser"
+          }
+        }
+      },
+      "VerifySuccessData": {
+        "type": "object",
+        "required": ["token", "user", "flow"],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "JWT — send as Authorization: Bearer <token> on protected routes"
+          },
+          "user": {
+            "$ref": "#/components/schemas/PublicUser"
+          },
+          "flow": {
+            "type": "string",
+            "enum": ["registration", "login"],
+            "description": "registration = first-time verify; login = verified user sign-in"
+          }
+        }
+      },
+      "SuccessVerify": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "message": { "type": "string" },
+          "data": {
+            "$ref": "#/components/schemas/VerifySuccessData"
           }
         }
       },
