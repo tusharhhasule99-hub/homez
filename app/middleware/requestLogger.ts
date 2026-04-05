@@ -2,16 +2,21 @@ import type express from 'express';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
 
-/** Local wall-clock time, e.g. `05 Apr 2026 16:18:42.111`. */
+/** Local wall-clock time, e.g. `05 Apr 2026 9:50:22.730 PM`. */
 function formatLogTimestamp(d: Date): string {
     const day = String(d.getDate()).padStart(2, '0');
     const mon = MONTHS[d.getMonth()];
     const y = d.getFullYear();
-    const h = String(d.getHours()).padStart(2, '0');
+    const hours24 = d.getHours();
+    let h12 = hours24 % 12;
+    if (h12 === 0) {
+        h12 = 12;
+    }
     const min = String(d.getMinutes()).padStart(2, '0');
     const s = String(d.getSeconds()).padStart(2, '0');
     const ms = String(d.getMilliseconds()).padStart(3, '0');
-    return `${day} ${mon} ${y} ${h}:${min}:${s}.${ms}`;
+    const period = hours24 >= 12 ? 'PM' : 'AM';
+    return `${day} ${mon} ${y} ${h12}:${min}:${s}.${ms} ${period}`;
 }
 
 /**
