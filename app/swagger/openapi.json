@@ -3,7 +3,7 @@
   "info": {
     "title": "HomeZ API",
     "version": "1.0.0",
-    "description": "HomeZ backend HTTP API.\n\n## Phone auth (OTP + JWT)\n\n**Register** — `POST /auth/register` with `phone_number` only: creates an unverified row (or resends OTP) and sends a **6-digit OTP** (10-minute expiry). Response returns **only** `id` and `phone_number` (no profile yet).\n\n**Verify** — `POST /auth/verify` with `phone_number` and `otp`: message **Verified.** and a **JWT**. Payload includes `is_onboarding_completed`, `onboarding_step`, and full `user` for routing: if `is_onboarding_completed` is `false`, open onboarding; otherwise go to home.\n\n**Login** — `POST /auth/login` then `POST /auth/verify` same as above.\n\n**Onboarding** — `POST /auth/onboarding` with `Authorization: Bearer <JWT>`. Two steps: **1** — `name`, `gender` (`male` | `female` | `other`). **2** — `address_formatted`, optional `address_label` (default `Home`), `latitude`, `longitude`. After step 2, `is_onboarding_completed` becomes `true`.\n\n**Discounts** — `GET /discounts` and `GET /discounts/code/{code}` require the same Bearer JWT.\n\nIndian numbers: you may send `phone_number` with or without `+91`; `+91` is stripped before storage."
+    "description": "HomeZ backend HTTP API.\n\n## Phone auth (OTP + JWT)\n\n**Register** — `POST /auth/register` with `phone_number` only: creates an unverified row (or resends OTP) and sends a **6-digit OTP** (10-minute expiry). Response returns **only** `id` and `phone_number` (no profile yet).\n\n**Verify** — `POST /auth/verify` with `phone_number` and `otp`: message **Verified.** and a **JWT**. Payload includes `is_onboarding_completed`, `onboarding_step`, and full `user` for routing: if `is_onboarding_completed` is `false`, open onboarding; otherwise go to home.\n\n**Login** — `POST /auth/login` then `POST /auth/verify` same as above.\n\n**Onboarding** — `POST /auth/onboarding` with `Authorization: Bearer <JWT>`. Two steps: **1** — `name`, `gender` (`male` | `female` | `other`). **2** — `address_formatted`, optional `address_label` (default `Home`), `latitude`, `longitude`. After step 2, `is_onboarding_completed` becomes `true`.\n\n**Discounts** — `GET /discounts` and `GET /discounts/code/{code}` require the same Bearer JWT.\n\n**Services** — `GET /services` and `GET /services/{id}` require `Authorization: Bearer <JWT>`. Query **`slot_type`**: `instant` (default), `scheduled`, or `all`. With `include_slots=true` on the list, `slots` is a filtered array; each slot includes its `slot_type`.\n\nIndian numbers: you may send `phone_number` with or without `+91`; `+91` is stripped before storage."
   },
   "servers": [
     {
@@ -24,6 +24,10 @@
     {
       "name": "Discounts",
       "description": "Promo codes (Bearer JWT from /auth/verify)"
+    },
+    {
+      "name": "Services",
+      "description": "Service catalog and duration/pricing slots (Bearer JWT from /auth/verify)"
     }
   ],
   "paths": {
@@ -427,6 +431,129 @@
           }
         }
       }
+    },
+    "/services": {
+      "get": {
+        "tags": ["Services"],
+        "summary": "List services",
+        "description": "Requires `Authorization: Bearer <JWT>`. Optional `include_slots=true` to embed a **`slots` array** filtered by `slot_type` (default **instant**).",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "include_slots",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "boolean", "default": false },
+            "description": "When true, include `slots` for each service."
+          },
+          {
+            "name": "slot_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["instant", "scheduled", "all"],
+              "default": "instant"
+            },
+            "description": "Which slot rows to return when `include_slots` is true. `all` returns both instant and scheduled tiers."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Service list",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SuccessServiceList" }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/services/{id}": {
+      "get": {
+        "tags": ["Services"],
+        "summary": "Get one service with slots",
+        "description": "Requires `Authorization: Bearer <JWT>`. Returns a **`slots` array** filtered by `slot_type` (default **instant**): duration, price, slash price.",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          },
+          {
+            "name": "slot_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["instant", "scheduled", "all"],
+              "default": "instant"
+            },
+            "description": "`instant` (default), `scheduled`, or `all`."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Service with slots",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SuccessServiceOne" }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -664,6 +791,55 @@
           "success": { "type": "boolean", "example": true },
           "message": { "type": "string" },
           "data": { "$ref": "#/components/schemas/PublicDiscount" }
+        }
+      },
+      "PublicSlot": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "slot_type": { "type": "string", "enum": ["instant", "scheduled"] },
+          "duration_label": { "type": "string", "example": "60 min" },
+          "duration_minutes": { "type": "integer", "example": 60 },
+          "price": { "type": "number", "format": "double" },
+          "slash_price": { "type": "number", "format": "double", "nullable": true },
+          "sort_order": { "type": "integer" }
+        }
+      },
+      "PublicService": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "slug": { "type": "string" },
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "image_url": { "type": "string", "format": "uri" },
+          "dos": { "type": "array", "items": { "type": "string" } },
+          "donts": { "type": "array", "items": { "type": "string" } },
+          "sort_order": { "type": "integer" },
+          "slots": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/PublicSlot" },
+            "description": "Present when list uses `include_slots=true` or on GET by id; filtered by `slot_type` (default instant)."
+          }
+        }
+      },
+      "SuccessServiceList": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "message": { "type": "string" },
+          "data": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/PublicService" }
+          }
+        }
+      },
+      "SuccessServiceOne": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "message": { "type": "string" },
+          "data": { "$ref": "#/components/schemas/PublicService" }
         }
       },
       "Error": {
