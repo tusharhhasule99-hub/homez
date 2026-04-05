@@ -4,10 +4,19 @@ import { generateOtpCode, hashOtp, verifyOtpHash, MissingOtpSecretError, OTP_TTL
 import { sendOtpSms } from '../../services/twilioOtpSms';
 import { signAccessToken, MissingJwtSecretError } from '../../utils/authToken';
 import { logAuthServiceError } from '../../utils/logAuthServiceError';
+import { MAX_ADDRESSES_PER_USER } from '../addresses/service';
 import { otpSentUserSelect, publicUserSelect, type OtpSentUser, type PublicUser } from './userPublic';
 
 const ALLOWED_GENDERS = new Set(['male', 'female', 'other']);
 const NAME_MAX_LEN = 200;
+const ONBOARDING_PINCODE = /^\d{6}$/;
+
+async function setOnlyDefaultAddress(userId: string, addressId: string): Promise<void> {
+    await prisma.$transaction([
+        prisma.address.updateMany({ where: { user_id: userId }, data: { is_default: false } }),
+        prisma.address.update({ where: { id: addressId }, data: { is_default: true } }),
+    ]);
+}
 
 const DEV_STATIC_OTP = '123456';
 
@@ -359,52 +368,79 @@ class authService {
                 };
             }
 
-            const addrRaw = body.address_formatted;
-            if (typeof addrRaw !== 'string' || !addrRaw.trim()) {
-                return {
-                    success: false as const,
-                    message: 'address_formatted is required.',
-                    code: 'VALIDATION' as const,
-                };
-            }
-            const address_formatted = addrRaw.trim();
+            const addressCount = await prisma.address.count({ where: { user_id: userId } });
 
-            let address_label = 'Home';
-            if (body.address_label !== undefined && body.address_label !== null) {
-                if (typeof body.address_label !== 'string' || !body.address_label.trim()) {
+            if (addressCount < MAX_ADDRESSES_PER_USER) {
+                const line1 = typeof body.line1 === 'string' ? body.line1.trim() : '';
+                const area = typeof body.area === 'string' ? body.area.trim() : '';
+                const city = typeof body.city === 'string' ? body.city.trim() : '';
+                const pincode = typeof body.pincode === 'string' ? body.pincode.trim() : '';
+                let label = 'Home';
+                if (body.label !== undefined && body.label !== null) {
+                    if (typeof body.label !== 'string' || !body.label.trim()) {
+                        return {
+                            success: false as const,
+                            message: 'label must be a non-empty string when provided.',
+                            code: 'VALIDATION' as const,
+                        };
+                    }
+                    label = body.label.trim().slice(0, 120);
+                }
+                const lat = body.latitude;
+                const lng = body.longitude;
+                if (!line1) {
+                    return { success: false as const, message: 'line1 is required.', code: 'VALIDATION' as const };
+                }
+                if (!area) {
+                    return { success: false as const, message: 'area is required.', code: 'VALIDATION' as const };
+                }
+                if (!city) {
+                    return { success: false as const, message: 'city is required.', code: 'VALIDATION' as const };
+                }
+                if (!pincode || !ONBOARDING_PINCODE.test(pincode)) {
                     return {
                         success: false as const,
-                        message: 'address_label must be a non-empty string when provided.',
+                        message: 'pincode must be a 6-digit Indian PIN code.',
                         code: 'VALIDATION' as const,
                     };
                 }
-                address_label = body.address_label.trim().slice(0, 120);
-            }
+                if (typeof lat !== 'number' || typeof lng !== 'number' || Number.isNaN(lat) || Number.isNaN(lng)) {
+                    return {
+                        success: false as const,
+                        message: 'latitude and longitude must be numbers.',
+                        code: 'VALIDATION' as const,
+                    };
+                }
+                if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+                    return {
+                        success: false as const,
+                        message: 'latitude must be -90..90 and longitude -180..180.',
+                        code: 'VALIDATION' as const,
+                    };
+                }
 
-            const lat = body.latitude;
-            const lng = body.longitude;
-            if (typeof lat !== 'number' || typeof lng !== 'number' || Number.isNaN(lat) || Number.isNaN(lng)) {
-                return {
-                    success: false as const,
-                    message: 'latitude and longitude must be numbers.',
-                    code: 'VALIDATION' as const,
-                };
-            }
-            if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-                return {
-                    success: false as const,
-                    message: 'latitude must be -90..90 and longitude -180..180.',
-                    code: 'VALIDATION' as const,
-                };
+                const makeDefault = addressCount === 0;
+                const created = await prisma.address.create({
+                    data: {
+                        user_id: userId,
+                        label,
+                        line1,
+                        area,
+                        city,
+                        pincode,
+                        latitude: lat,
+                        longitude: lng,
+                        is_default: makeDefault,
+                    },
+                });
+                if (makeDefault) {
+                    await setOnlyDefaultAddress(userId, created.id);
+                }
             }
 
             const updated: PublicUser = await prisma.users.update({
                 where: { id: userId },
                 data: {
-                    address_label,
-                    address_formatted,
-                    latitude: lat,
-                    longitude: lng,
                     onboarding_step: 2,
                     is_onboarding_completed: true,
                 },

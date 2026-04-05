@@ -3,7 +3,7 @@
   "info": {
     "title": "HomeZ API",
     "version": "1.0.0",
-    "description": "HomeZ backend HTTP API.\n\n## Phone auth (OTP + JWT)\n\n**Register** — `POST /auth/register` with `phone_number` only: creates an unverified row (or resends OTP) and sends a **6-digit OTP** (10-minute expiry). Response returns **only** `id` and `phone_number` (no profile yet).\n\n**Verify** — `POST /auth/verify` with `phone_number` and `otp`: message **Verified.** and a **JWT**. Payload includes `is_onboarding_completed`, `onboarding_step`, and full `user` for routing: if `is_onboarding_completed` is `false`, open onboarding; otherwise go to home.\n\n**Login** — `POST /auth/login` then `POST /auth/verify` same as above.\n\n**Onboarding** — `POST /auth/onboarding` with `Authorization: Bearer <JWT>`. Two steps: **1** — `name`, `gender` (`male` | `female` | `other`). **2** — `address_formatted`, optional `address_label` (default `Home`), `latitude`, `longitude`. After step 2, `is_onboarding_completed` becomes `true`.\n\n**Discounts** — `GET /discounts` and `GET /discounts/code/{code}` require the same Bearer JWT.\n\n**Services** — `GET /services` and `GET /services/{id}` require `Authorization: Bearer <JWT>`. Query **`slot_type`**: `instant` (default), `scheduled`, or `all`. With `include_slots=true` on the list, `slots` is a filtered array; each slot includes its `slot_type`.\n\nIndian numbers: you may send `phone_number` with or without `+91`; `+91` is stripped before storage."
+    "description": "HomeZ backend HTTP API.\n\n## Phone auth (OTP + JWT)\n\n**Register** — `POST /auth/register` with `phone_number` only: creates an unverified row (or resends OTP) and sends a **6-digit OTP** (10-minute expiry). Response returns **only** `id` and `phone_number` (no profile yet).\n\n**Verify** — `POST /auth/verify` with `phone_number` and `otp`: message **Verified.** and a **JWT**. Payload includes `is_onboarding_completed`, `onboarding_step`, and full `user` for routing: if `is_onboarding_completed` is `false`, open onboarding; otherwise go to home.\n\n**Login** — `POST /auth/login` then `POST /auth/verify` same as above.\n\n**Onboarding** — `POST /auth/onboarding` with `Authorization: Bearer <JWT>`. **1** — `name`, `gender`. **2** — structured service location saved as the user’s first **`addresses`** row (`line1`, `area`, `city`, `pincode`, `latitude`, `longitude`, optional `label`; same rules as `POST /addresses`). If the user already has 3 saved addresses, step 2 only marks onboarding complete. Then `is_onboarding_completed` is `true`.\n\n**Discounts** — `GET /discounts` and `GET /discounts/code/{code}` require the same Bearer JWT.\n\n**Services** — `GET /services` and `GET /services/{id}` require `Authorization: Bearer <JWT>`. Query **`slot_type`**: `instant` (default), `scheduled`, or `all`. With `include_slots=true` on the list, `slots` is a filtered array; each slot includes its `slot_type`.\n\n**Addresses** — `GET/POST /addresses`, `GET/PATCH/DELETE /addresses/{id}` require JWT. **Max 3 saved addresses** per user; first address is default unless you set `is_default`.\n\nIndian numbers: you may send `phone_number` with or without `+91`; `+91` is stripped before storage."
   },
   "servers": [
     {
@@ -28,6 +28,10 @@
     {
       "name": "Services",
       "description": "Service catalog and duration/pricing slots (Bearer JWT from /auth/verify)"
+    },
+    {
+      "name": "Addresses",
+      "description": "User saved addresses for checkout (Bearer JWT); max 3 per user"
     }
   ],
   "paths": {
@@ -245,7 +249,7 @@
       "post": {
         "tags": ["Onboarding"],
         "summary": "Submit onboarding step",
-        "description": "**Step 1:** name + gender. **Step 2:** service address + map coordinates. Requires verified user JWT.",
+        "description": "**Step 1:** name + gender. **Step 2:** structured fields (`line1`, `area`, `city`, `pincode`, map coords, optional `label`) — creates a row in **`addresses`** if the user has fewer than 3; otherwise only completes onboarding. Requires verified user JWT.",
         "security": [{ "bearerAuth": [] }],
         "requestBody": {
           "required": true,
@@ -260,11 +264,14 @@
                   "value": { "step": 1, "name": "Priya Sharma", "gender": "female" }
                 },
                 "step2": {
-                  "summary": "Step 2 — address & pin",
+                  "summary": "Step 2 — structured address (saved to addresses table)",
                   "value": {
                     "step": 2,
-                    "address_label": "Home",
-                    "address_formatted": "123 Main Street, Andheri West, Mumbai - 400058",
+                    "label": "Home",
+                    "line1": "123 Main Street",
+                    "area": "Andheri West",
+                    "city": "Mumbai",
+                    "pincode": "400058",
                     "latitude": 19.1364,
                     "longitude": 72.8296
                   }
@@ -554,6 +561,267 @@
           }
         }
       }
+    },
+    "/addresses": {
+      "get": {
+        "tags": ["Addresses"],
+        "summary": "List my saved addresses",
+        "description": "Default address first, then oldest first. Bearer JWT required.",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Address list",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SuccessAddressList" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Addresses"],
+        "summary": "Add a saved address",
+        "description": "Maximum **3** addresses per user. Returns 409 if limit reached. Indian **pincode** must be 6 digits.",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AddressCreateBody" },
+              "example": {
+                "label": "Home",
+                "line1": "123 Main Street",
+                "area": "Andheri West",
+                "city": "Mumbai",
+                "pincode": "400058",
+                "latitude": 19.1364,
+                "longitude": 72.8296,
+                "is_default": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SuccessAddressOne" }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "409": {
+            "description": "Address limit (3) reached",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/addresses/{id}": {
+      "get": {
+        "tags": ["Addresses"],
+        "summary": "Get one address",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SuccessAddressOne" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": ["Addresses"],
+        "summary": "Update an address",
+        "description": "Partial update. Setting `is_default: true` clears default on other addresses.",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AddressPatchBody" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SuccessAddressOne" }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Addresses"],
+        "summary": "Delete an address",
+        "description": "If the default is removed, the oldest remaining address becomes default.",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SuccessAddressDelete" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -636,10 +904,6 @@
             "nullable": true,
             "enum": ["male", "female", "other"]
           },
-          "address_label": { "type": "string", "nullable": true },
-          "address_formatted": { "type": "string", "nullable": true },
-          "latitude": { "type": "number", "format": "double", "nullable": true },
-          "longitude": { "type": "number", "format": "double", "nullable": true },
           "is_onboarding_completed": {
             "type": "boolean",
             "description": "If false, show onboarding; use onboarding_step for which screen."
@@ -664,15 +928,19 @@
       },
       "OnboardingStep2": {
         "type": "object",
-        "required": ["step", "address_formatted", "latitude", "longitude"],
+        "required": ["step"],
+        "description": "When the user has **fewer than 3** saved addresses, include `line1`, `area`, `city`, `pincode`, `latitude`, `longitude` (and optional `label`). If they already have **3** addresses, send only `{ \"step\": 2 }` to finish onboarding.",
         "properties": {
           "step": { "type": "integer", "enum": [2] },
-          "address_label": {
+          "label": {
             "type": "string",
             "maxLength": 120,
             "description": "Defaults to Home if omitted"
           },
-          "address_formatted": { "type": "string" },
+          "line1": { "type": "string" },
+          "area": { "type": "string" },
+          "city": { "type": "string" },
+          "pincode": { "type": "string", "pattern": "^[0-9]{6}$" },
           "latitude": { "type": "number", "format": "double", "minimum": -90, "maximum": 90 },
           "longitude": { "type": "number", "format": "double", "minimum": -180, "maximum": 180 }
         }
@@ -840,6 +1108,82 @@
           "success": { "type": "boolean", "example": true },
           "message": { "type": "string" },
           "data": { "$ref": "#/components/schemas/PublicService" }
+        }
+      },
+      "PublicAddress": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "user_id": { "type": "string", "format": "uuid" },
+          "label": { "type": "string", "example": "Home" },
+          "line1": { "type": "string" },
+          "area": { "type": "string" },
+          "city": { "type": "string" },
+          "pincode": { "type": "string", "pattern": "^[0-9]{6}$" },
+          "latitude": { "type": "number", "format": "double" },
+          "longitude": { "type": "number", "format": "double" },
+          "is_default": { "type": "boolean" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AddressCreateBody": {
+        "type": "object",
+        "required": ["label", "line1", "area", "city", "pincode", "latitude", "longitude"],
+        "properties": {
+          "label": { "type": "string" },
+          "line1": { "type": "string" },
+          "area": { "type": "string" },
+          "city": { "type": "string" },
+          "pincode": { "type": "string", "pattern": "^[0-9]{6}$" },
+          "latitude": { "type": "number", "format": "double" },
+          "longitude": { "type": "number", "format": "double" },
+          "is_default": { "type": "boolean", "default": false }
+        }
+      },
+      "AddressPatchBody": {
+        "type": "object",
+        "properties": {
+          "label": { "type": "string" },
+          "line1": { "type": "string" },
+          "area": { "type": "string" },
+          "city": { "type": "string" },
+          "pincode": { "type": "string" },
+          "latitude": { "type": "number", "format": "double" },
+          "longitude": { "type": "number", "format": "double" },
+          "is_default": { "type": "boolean" }
+        }
+      },
+      "SuccessAddressList": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "message": { "type": "string" },
+          "data": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/PublicAddress" }
+          }
+        }
+      },
+      "SuccessAddressOne": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "message": { "type": "string" },
+          "data": { "$ref": "#/components/schemas/PublicAddress" }
+        }
+      },
+      "SuccessAddressDelete": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "message": { "type": "string" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "format": "uuid" }
+            }
+          }
         }
       },
       "Error": {

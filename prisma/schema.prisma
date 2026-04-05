@@ -17,10 +17,6 @@ model Users {
 
   name              String?
   gender            String?
-  address_label     String?
-  address_formatted String?
-  latitude          Float?
-  longitude         Float?
 
   is_onboarding_completed Boolean @default(false)
   onboarding_step         Int     @default(1)
@@ -28,10 +24,31 @@ model Users {
   otp_hash       String?
   otp_expires_at DateTime?
 
+  addresses Address[]
+
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
   @@map("users")
+}
+
+model Address {
+  id         String   @id @default(uuid())
+  user_id    String
+  user       Users    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  label      String
+  line1      String
+  area       String
+  city       String
+  pincode    String
+  latitude   Float
+  longitude  Float
+  is_default Boolean  @default(false)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([user_id])
+  @@map("addresses")
 }
 
 model Discount {
