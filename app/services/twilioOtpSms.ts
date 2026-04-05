@@ -1,8 +1,8 @@
 import twilio from 'twilio';
 import { toIndiaE164 } from '../utils/phone';
 
-function isDevLogOnly(): boolean {
-    return process.env.OTP_DEV_LOG_ONLY === 'true' || process.env.OTP_DEV_LOG_ONLY === '1';
+function isProductionBackend(): boolean {
+    return process.env.NODE_ENV === 'production';
 }
 
 function hasTwilioConfig(): boolean {
@@ -13,14 +13,18 @@ function hasTwilioConfig(): boolean {
 }
 
 /**
- * Sends OTP via Twilio SMS to an Indian national stored number, or logs in dev.
+ * Sends OTP via Twilio SMS (production only). Non-production uses a static dev OTP in auth; this is not called then.
  */
 export async function sendOtpSms(normalizedNationalPhone: string, otpCode: string): Promise<void> {
+    if (!isProductionBackend()) {
+        return;
+    }
+
     const to = toIndiaE164(normalizedNationalPhone);
     const body = `Your HomeZ verification code is ${otpCode}. It expires in 10 minutes.`;
 
-    if (isDevLogOnly() || !hasTwilioConfig()) {
-        console.log(`[OTP SMS] to=${to} ${body}`);
+    if (!hasTwilioConfig()) {
+        console.warn(`[OTP SMS] production but Twilio env missing; would send to=${to}`);
         return;
     }
 

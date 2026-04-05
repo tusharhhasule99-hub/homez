@@ -19,7 +19,12 @@ app.use(requestLogger(PORT));
 app.use(
     '/api-docs',
     swaggerUi.serve,
-    swaggerUi.setup(openapiDocument as Record<string, unknown>, { explorer: true }),
+    swaggerUi.setup(openapiDocument as Record<string, unknown>, {
+        explorer: true,
+        swaggerOptions: {
+            persistAuthorization: true,
+        },
+    }),
 );
 app.use(helmet());
 

@@ -9,18 +9,26 @@ import { otpSentUserSelect, publicUserSelect, type OtpSentUser, type PublicUser 
 const ALLOWED_GENDERS = new Set(['male', 'female', 'other']);
 const NAME_MAX_LEN = 200;
 
+const DEV_STATIC_OTP = '123456';
+
+function isProductionBackend(): boolean {
+    return process.env.NODE_ENV === 'production';
+}
+
 function otpExpiry(): Date {
     return new Date(Date.now() + OTP_TTL_MS);
 }
 
 async function persistOtpAndSend(userId: string, normalizedPhone: string): Promise<void> {
-    const code = generateOtpCode();
+    const code = isProductionBackend() ? generateOtpCode() : DEV_STATIC_OTP;
     const hash = hashOtp(code);
     await prisma.users.update({
         where: { id: userId },
         data: { otp_hash: hash, otp_expires_at: otpExpiry() },
     });
-    await sendOtpSms(normalizedPhone, code);
+    if (isProductionBackend()) {
+        await sendOtpSms(normalizedPhone, code);
+    }
 }
 
 function normalizeGender(raw: unknown): string | null {

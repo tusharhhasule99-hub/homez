@@ -11,6 +11,7 @@
       "description": "API base path"
     }
   ],
+  "security": [{ "bearerAuth": [] }],
   "tags": [
     {
       "name": "Auth",
@@ -27,6 +28,7 @@
         "tags": ["Auth"],
         "summary": "Start registration — sends OTP",
         "description": "Creates an unverified user (or resends OTP). Returns only `id` and `phone_number`. No JWT until verify.",
+        "security": [],
         "requestBody": {
           "required": true,
           "content": {
@@ -104,6 +106,7 @@
         "tags": ["Auth"],
         "summary": "Start login — sends OTP",
         "description": "Only for verified users. Sends OTP; response is only `id` and `phone_number`. Use verify for JWT.",
+        "security": [],
         "requestBody": {
           "required": true,
           "content": {
@@ -171,6 +174,7 @@
         "tags": ["Auth"],
         "summary": "Verify OTP — returns JWT",
         "description": "Same endpoint after register or login. Message is **Verified.** Includes `is_onboarding_completed`, `onboarding_step`, and `user` so the client can open onboarding (step 1 or 2) or home.",
+        "security": [],
         "requestBody": {
           "required": true,
           "content": {
@@ -330,7 +334,7 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "JWT",
-        "description": "JWT from POST /auth/verify (Authorization: Bearer <token>)"
+        "description": "Paste the JWT string only (Swagger adds the Bearer prefix). Get it from POST /auth/verify → data.token. Then use Authorize at the top of this page."
       }
     },
     "examples": {
