@@ -10,6 +10,27 @@ const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '../..');
 
 /**
+ * Prisma 7 client source is ESM (import.meta). tsc emits CommonJS but can leave import.meta in
+ * the output, which throws in CJS. If package.json is interpreted as "module", the same file
+ * then fails on `exports`. Replace the shim so the compiled client is valid CJS.
+ */
+function patchPrismaGeneratedCjs(distRoot) {
+    const clientJs = path.join(distRoot, 'app', 'generated', 'prisma', 'client.js');
+    if (!fs.existsSync(clientJs)) {
+        return;
+    }
+    let src = fs.readFileSync(clientJs, 'utf8');
+    const needle =
+        /globalThis\['__dirname'\]\s*=\s*path\.dirname\(\(0,\s*node_url_1\.fileURLToPath\)\(import\.meta\.url\)\)/;
+    if (!needle.test(src)) {
+        return;
+    }
+    src = src.replace(needle, "globalThis['__dirname'] = __dirname");
+    fs.writeFileSync(clientJs, src, 'utf8');
+    console.log('🔧 Patched Prisma client.js for CommonJS (import.meta → __dirname)');
+}
+
+/**
  * Safe build: compile into dist_tmp, optional path-alias rewrite, then atomically replace dist.
  * Leaves the previous dist in place if the build fails (useful for zero-downtime redeploys).
  */
@@ -28,6 +49,8 @@ async function safeBuild() {
             stdio: 'inherit',
             cwd: projectRoot,
         });
+
+        patchPrismaGeneratedCjs(distTmpPath);
 
         const tsconfigPath = path.join(projectRoot, 'tsconfig.json');
         const tsconfig = JSON.parse(fs.readFileSync(tsconfigPath, 'utf8'));
