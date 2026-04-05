@@ -1,4 +1,5 @@
 {
+  "type": "module",
   "scripts": {
     "build": "prisma generate && node app/utils/safeBuild.mjs",
     "dev": "prisma generate && nodemon",
