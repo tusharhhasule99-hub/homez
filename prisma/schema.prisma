@@ -1,0 +1,21 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Users {
+  id           String @id @default(uuid())
+  phone_number String
+
+  is_active   Boolean  @default(true)
+  is_deleted  Boolean  @default(false)
+  is_verified Boolean  @default(false)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  @@map("users")
+}

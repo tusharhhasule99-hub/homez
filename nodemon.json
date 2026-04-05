@@ -1,0 +1,6 @@
+{
+  "watch": ["app", "app.ts"],
+  "ext": "ts,json",
+  "ignore": ["app/generated/**", "**/*.test.ts"],
+  "exec": "tsx app.ts"
+}

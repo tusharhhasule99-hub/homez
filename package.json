@@ -1,0 +1,26 @@
+{
+  "scripts": {
+    "build": "prisma generate && node app/utils/safeBuild.mjs",
+    "dev": "prisma generate && nodemon",
+    "start": "node dist/app.js"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.6.0",
+    "cors": "^2.8.6",
+    "crons": "^1.1.1-alpha.0",
+    "dotenv": "^17.4.0",
+    "express": "^5.2.1",
+    "helmet": "^8.1.0",
+    "pg": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/pg": "^8.20.0",
+    "nodemon": "^3.1.14",
+    "prisma": "^7.6.0",
+    "tsc-alias": "^1.8.16",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  }
+}

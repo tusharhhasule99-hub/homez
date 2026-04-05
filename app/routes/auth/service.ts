@@ -1,0 +1,49 @@
+import { prisma } from '../../utils/prisma';
+
+class authService {
+    constructor() {
+    }
+
+    register = async (phone_number: string) => {
+        try {
+            const existingUser = await prisma.users.findFirst({
+                where: {
+                    phone_number: phone_number,
+                    is_active: true,
+                    is_deleted: false,
+                    is_verified: true,
+                },
+            });
+            if (existingUser) {
+                return {
+                    success: false,
+                    message: 'User already exists. Please login to continue.',
+                };
+            }
+
+            const newUser = await prisma.users.create({
+                data: {
+                    phone_number: phone_number,
+                    is_active: true,
+                    is_deleted: false,
+                    is_verified: true,
+                },
+            });
+
+            return {
+                success: true,
+                message: 'User registered successfully. Please login to continue.',
+                data: newUser,
+            };
+        } catch (error) {
+            console.error("Error in register service :: Internal server error", error);
+            return {
+                success: false,
+                message: 'Internal server error. Please try again later.',
+                code: 'INTERNAL_SERVER_ERROR',
+            };
+        }
+    }
+}
+
+export default authService;
