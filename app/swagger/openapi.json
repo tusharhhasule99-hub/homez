@@ -29,11 +29,14 @@
               "schema": {
                 "$ref": "#/components/schemas/PhoneBody"
               },
-              "example": [{
-                "phone_number": "+9189298198549"
-              },{
-                "phone_number": "89298198549"
-              }]
+              "examples": {
+                "with_plus91": {
+                  "$ref": "#/components/examples/phoneWithPlus91"
+                },
+                "national_number": {
+                  "$ref": "#/components/examples/phoneNational"
+                }
+              }
             }
           }
         },
@@ -82,11 +85,14 @@
               "schema": {
                 "$ref": "#/components/schemas/PhoneBody"
               },
-              "example": [{
-                "phone_number": "+9189298198549"
-              },{
-                "phone_number": "89298198549"
-              }]
+              "examples": {
+                "with_plus91": {
+                  "$ref": "#/components/examples/phoneWithPlus91"
+                },
+                "national_number": {
+                  "$ref": "#/components/examples/phoneNational"
+                }
+              }
             }
           }
         },
@@ -126,14 +132,34 @@
     }
   },
   "components": {
+    "examples": {
+      "phoneWithPlus91": {
+        "summary": "With +91 (India)",
+        "description": "You may include +91; it is removed before storage so it matches the national form.",
+        "value": {
+          "phone_number": "+919876543210"
+        }
+      },
+      "phoneNational": {
+        "summary": "National number only",
+        "description": "Send the mobile number without country code; same stored value as the +91 example above.",
+        "value": {
+          "phone_number": "9876543210"
+        }
+      }
+    },
     "schemas": {
       "PhoneBody": {
         "type": "object",
         "required": ["phone_number"],
+        "example": {
+          "phone_number": "+919876543210"
+        },
         "properties": {
           "phone_number": {
             "type": "string",
-            "description": "User phone number"
+            "description": "Indian mobile: send either with leading +91 or as a national number only; +91 is stripped before storage.",
+            "example": "+919876543210"
           }
         }
       },

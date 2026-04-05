@@ -1,4 +1,5 @@
 import { prisma } from '../../utils/prisma';
+import { normalizePhoneForStorage } from '../../utils/phone';
 
 class authService {
     constructor() {
@@ -6,9 +7,17 @@ class authService {
 
     register = async (phone_number: string) => {
         try {
+            const normalized = normalizePhoneForStorage(phone_number);
+            if (!normalized) {
+                return {
+                    success: false,
+                    message: 'Phone number is required',
+                };
+            }
+
             const existingUser = await prisma.users.findFirst({
                 where: {
-                    phone_number: phone_number,
+                    phone_number: normalized,
                     is_active: true,
                     is_deleted: false,
                     is_verified: true,
@@ -23,7 +32,7 @@ class authService {
 
             const newUser = await prisma.users.create({
                 data: {
-                    phone_number: phone_number,
+                    phone_number: normalized,
                     is_active: true,
                     is_deleted: false,
                     is_verified: true,
@@ -47,9 +56,17 @@ class authService {
 
     login = async (phone_number: string) => {
         try {
+            const normalized = normalizePhoneForStorage(phone_number);
+            if (!normalized) {
+                return {
+                    success: false,
+                    message: 'Phone number is required',
+                };
+            }
+
             const user = await prisma.users.findFirst({
                 where: {
-                    phone_number: phone_number,
+                    phone_number: normalized,
                     is_active: true,
                     is_deleted: false,
                     is_verified: true,

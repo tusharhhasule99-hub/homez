@@ -7,12 +7,14 @@ import openapiDocument from './app/swagger/openapi.json';
 dotenv.config();
 
 import routes from './app/routes/routes';
+import { requestLogger } from './app/middleware/requestLogger';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
+app.use(requestLogger(PORT));
 app.use(
     '/api-docs',
     swaggerUi.serve,
