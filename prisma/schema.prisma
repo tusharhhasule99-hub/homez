@@ -15,6 +15,16 @@ model Users {
   is_deleted  Boolean  @default(false)
   is_verified Boolean  @default(false)
 
+  name               String?
+  gender             String?
+  address_label      String?
+  address_formatted  String?
+  latitude           Float?
+  longitude          Float?
+
+  is_onboarding_completed Boolean @default(false)
+  onboarding_step         Int     @default(1)
+
   otp_hash       String?
   otp_expires_at DateTime?
 

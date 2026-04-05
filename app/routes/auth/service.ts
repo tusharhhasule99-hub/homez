@@ -4,7 +4,10 @@ import { generateOtpCode, hashOtp, verifyOtpHash, MissingOtpSecretError, OTP_TTL
 import { sendOtpSms } from '../../services/twilioOtpSms';
 import { signAccessToken, MissingJwtSecretError } from '../../utils/authToken';
 import { logAuthServiceError } from '../../utils/logAuthServiceError';
-import { publicUserSelect, type PublicUser } from './userPublic';
+import { otpSentUserSelect, publicUserSelect, type OtpSentUser, type PublicUser } from './userPublic';
+
+const ALLOWED_GENDERS = new Set(['male', 'female', 'other']);
+const NAME_MAX_LEN = 200;
 
 function otpExpiry(): Date {
     return new Date(Date.now() + OTP_TTL_MS);
@@ -18,6 +21,12 @@ async function persistOtpAndSend(userId: string, normalizedPhone: string): Promi
         data: { otp_hash: hash, otp_expires_at: otpExpiry() },
     });
     await sendOtpSms(normalizedPhone, code);
+}
+
+function normalizeGender(raw: unknown): string | null {
+    if (typeof raw !== 'string') return null;
+    const g = raw.trim().toLowerCase();
+    return ALLOWED_GENDERS.has(g) ? g : null;
 }
 
 class authService {
@@ -60,12 +69,12 @@ class authService {
                 await persistOtpAndSend(pending.id, normalized);
                 const user = await prisma.users.findUniqueOrThrow({
                     where: { id: pending.id },
-                    select: publicUserSelect,
+                    select: otpSentUserSelect,
                 });
                 return {
                     success: true as const,
                     created: false as const,
-                    message: 'OTP sent. Verify to complete registration.',
+                    message: 'OTP sent. Verify your number to continue.',
                     data: user,
                 };
             }
@@ -81,12 +90,12 @@ class authService {
             await persistOtpAndSend(created.id, normalized);
             const user = await prisma.users.findUniqueOrThrow({
                 where: { id: created.id },
-                select: publicUserSelect,
+                select: otpSentUserSelect,
             });
             return {
                 success: true as const,
                 created: true as const,
-                message: 'OTP sent. Verify to complete registration.',
+                message: 'OTP sent. Verify your number to continue.',
                 data: user,
             };
         } catch (error) {
@@ -135,14 +144,14 @@ class authService {
             }
 
             await persistOtpAndSend(user.id, normalized);
-            const publicUser: PublicUser = await prisma.users.findUniqueOrThrow({
+            const slim: OtpSentUser = await prisma.users.findUniqueOrThrow({
                 where: { id: user.id },
-                select: publicUserSelect,
+                select: otpSentUserSelect,
             });
             return {
                 success: true as const,
-                message: 'OTP sent. Verify to sign in.',
-                data: publicUser,
+                message: 'OTP sent. Verify your number to continue.',
+                data: slim,
             };
         } catch (error) {
             if (error instanceof MissingOtpSecretError) {
@@ -216,13 +225,13 @@ class authService {
 
             return {
                 success: true as const,
-                message: wasCompletingRegistration
-                    ? 'Registration complete. You are signed in.'
-                    : 'Signed in successfully.',
+                message: 'Verified.',
                 data: {
                     token,
                     user: updated,
                     flow: wasCompletingRegistration ? ('registration' as const) : ('login' as const),
+                    is_onboarding_completed: updated.is_onboarding_completed,
+                    onboarding_step: updated.onboarding_step,
                 },
             };
         } catch (error) {
@@ -253,6 +262,153 @@ class authService {
                 };
             }
             logAuthServiceError('verify', 'handler', 'app/routes/auth/service.ts', error);
+            return {
+                success: false as const,
+                message: 'Internal server error. Please try again later.',
+                code: 'INTERNAL_SERVER_ERROR' as const,
+            };
+        }
+    };
+
+    submitOnboardingStep = async (userId: string, body: Record<string, unknown>) => {
+        try {
+            const step = body.step;
+            if (step !== 1 && step !== 2) {
+                return {
+                    success: false as const,
+                    message: 'step must be 1 (name & gender) or 2 (address).',
+                    code: 'INVALID_STEP' as const,
+                };
+            }
+
+            const user = await prisma.users.findFirst({
+                where: { id: userId, is_active: true, is_deleted: false },
+            });
+            if (!user) {
+                return { success: false as const, message: 'User not found.', code: 'USER_NOT_FOUND' as const };
+            }
+            if (!user.is_verified) {
+                return {
+                    success: false as const,
+                    message: 'Verify your phone before onboarding.',
+                    code: 'NOT_VERIFIED' as const,
+                };
+            }
+            if (user.is_onboarding_completed) {
+                return {
+                    success: false as const,
+                    message: 'Onboarding is already complete.',
+                    code: 'ONBOARDING_COMPLETE' as const,
+                };
+            }
+
+            if (step === 1) {
+                if (user.onboarding_step !== 1) {
+                    return {
+                        success: false as const,
+                        message: 'Step 1 is already done. Continue with step 2 (address).',
+                        code: 'INVALID_STEP_ORDER' as const,
+                    };
+                }
+                const nameRaw = body.name;
+                if (typeof nameRaw !== 'string' || !nameRaw.trim()) {
+                    return { success: false as const, message: 'name is required.', code: 'VALIDATION' as const };
+                }
+                const name = nameRaw.trim();
+                if (name.length > NAME_MAX_LEN) {
+                    return {
+                        success: false as const,
+                        message: `name must be at most ${NAME_MAX_LEN} characters.`,
+                        code: 'VALIDATION' as const,
+                    };
+                }
+                const gender = normalizeGender(body.gender);
+                if (!gender) {
+                    return {
+                        success: false as const,
+                        message: 'gender must be one of: male, female, other.',
+                        code: 'VALIDATION' as const,
+                    };
+                }
+
+                const updated: PublicUser = await prisma.users.update({
+                    where: { id: userId },
+                    data: { name, gender, onboarding_step: 2 },
+                    select: publicUserSelect,
+                });
+                return {
+                    success: true as const,
+                    message: 'Profile saved. Continue to address.',
+                    data: updated,
+                };
+            }
+
+            if (user.onboarding_step !== 2) {
+                return {
+                    success: false as const,
+                    message: 'Complete step 1 (name & gender) first.',
+                    code: 'INVALID_STEP_ORDER' as const,
+                };
+            }
+
+            const addrRaw = body.address_formatted;
+            if (typeof addrRaw !== 'string' || !addrRaw.trim()) {
+                return {
+                    success: false as const,
+                    message: 'address_formatted is required.',
+                    code: 'VALIDATION' as const,
+                };
+            }
+            const address_formatted = addrRaw.trim();
+
+            let address_label = 'Home';
+            if (body.address_label !== undefined && body.address_label !== null) {
+                if (typeof body.address_label !== 'string' || !body.address_label.trim()) {
+                    return {
+                        success: false as const,
+                        message: 'address_label must be a non-empty string when provided.',
+                        code: 'VALIDATION' as const,
+                    };
+                }
+                address_label = body.address_label.trim().slice(0, 120);
+            }
+
+            const lat = body.latitude;
+            const lng = body.longitude;
+            if (typeof lat !== 'number' || typeof lng !== 'number' || Number.isNaN(lat) || Number.isNaN(lng)) {
+                return {
+                    success: false as const,
+                    message: 'latitude and longitude must be numbers.',
+                    code: 'VALIDATION' as const,
+                };
+            }
+            if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+                return {
+                    success: false as const,
+                    message: 'latitude must be -90..90 and longitude -180..180.',
+                    code: 'VALIDATION' as const,
+                };
+            }
+
+            const updated: PublicUser = await prisma.users.update({
+                where: { id: userId },
+                data: {
+                    address_label,
+                    address_formatted,
+                    latitude: lat,
+                    longitude: lng,
+                    onboarding_step: 2,
+                    is_onboarding_completed: true,
+                },
+                select: publicUserSelect,
+            });
+            return {
+                success: true as const,
+                message: 'Onboarding complete.',
+                data: updated,
+            };
+        } catch (error) {
+            logAuthServiceError('submitOnboardingStep', 'handler', 'app/routes/auth/service.ts', error);
             return {
                 success: false as const,
                 message: 'Internal server error. Please try again later.',

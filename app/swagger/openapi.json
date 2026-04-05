@@ -3,7 +3,7 @@
   "info": {
     "title": "HomeZ API",
     "version": "1.0.0",
-    "description": "HomeZ backend HTTP API.\n\n## Phone auth (OTP + JWT)\n\n**Register (new user)**\n1. `POST /auth/register` with `phone_number` — creates an unverified account (or resends OTP if signup was already started) and sends a **6-digit OTP** by SMS. The OTP is stored hashed in the database and expires in **10 minutes**.\n2. `POST /auth/verify` with the same `phone_number` and `otp` — validates the code, sets **is_verified** to `true`, and returns a **JWT**.\n\n**Login (verified user)**\n1. `POST /auth/login` with `phone_number` — sends a new OTP (10-minute expiry).\n2. `POST /auth/verify` with `phone_number` and `otp` — returns a **JWT**.\n\n**Single verify endpoint** — After a successful verify, the response includes `flow`: `registration` (account was unverified before this OTP) or `login` (account was already verified; this OTP was for sign-in). You can use the same client code for both.\n\nIndian numbers: you may send `phone_number` with or without a leading `+91`; `+91` is stripped before storage."
+    "description": "HomeZ backend HTTP API.\n\n## Phone auth (OTP + JWT)\n\n**Register** — `POST /auth/register` with `phone_number` only: creates an unverified row (or resends OTP) and sends a **6-digit OTP** (10-minute expiry). Response returns **only** `id` and `phone_number` (no profile yet).\n\n**Verify** — `POST /auth/verify` with `phone_number` and `otp`: message **Verified.** and a **JWT**. Payload includes `is_onboarding_completed`, `onboarding_step`, and full `user` for routing: if `is_onboarding_completed` is `false`, open onboarding; otherwise go to home.\n\n**Login** — `POST /auth/login` then `POST /auth/verify` same as above.\n\n**Onboarding** — `POST /auth/onboarding` with `Authorization: Bearer <JWT>`. Two steps: **1** — `name`, `gender` (`male` | `female` | `other`). **2** — `address_formatted`, optional `address_label` (default `Home`), `latitude`, `longitude`. After step 2, `is_onboarding_completed` becomes `true`.\n\nIndian numbers: you may send `phone_number` with or without `+91`; `+91` is stripped before storage."
   },
   "servers": [
     {
@@ -15,6 +15,10 @@
     {
       "name": "Auth",
       "description": "OTP-based registration, login, and verify (JWT)"
+    },
+    {
+      "name": "Onboarding",
+      "description": "Profile and address steps after phone verification (Bearer JWT)"
     }
   ],
   "paths": {
@@ -22,7 +26,7 @@
       "post": {
         "tags": ["Auth"],
         "summary": "Start registration — sends OTP",
-        "description": "Creates an unverified user (or resends OTP). Does not return a JWT until you call verify.",
+        "description": "Creates an unverified user (or resends OTP). Returns only `id` and `phone_number`. No JWT until verify.",
         "requestBody": {
           "required": true,
           "content": {
@@ -99,7 +103,7 @@
       "post": {
         "tags": ["Auth"],
         "summary": "Start login — sends OTP",
-        "description": "Only for users who are already verified. Sends a new OTP; use verify to get a JWT.",
+        "description": "Only for verified users. Sends OTP; response is only `id` and `phone_number`. Use verify for JWT.",
         "requestBody": {
           "required": true,
           "content": {
@@ -166,7 +170,7 @@
       "post": {
         "tags": ["Auth"],
         "summary": "Verify OTP — returns JWT",
-        "description": "Same endpoint after register or login. Returns `flow` so you know if this completed registration or login.",
+        "description": "Same endpoint after register or login. Message is **Verified.** Includes `is_onboarding_completed`, `onboarding_step`, and `user` so the client can open onboarding (step 1 or 2) or home.",
         "requestBody": {
           "required": true,
           "content": {
@@ -224,9 +228,111 @@
           }
         }
       }
+    },
+    "/auth/onboarding": {
+      "post": {
+        "tags": ["Onboarding"],
+        "summary": "Submit onboarding step",
+        "description": "**Step 1:** name + gender. **Step 2:** service address + map coordinates. Requires verified user JWT.",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OnboardingBody"
+              },
+              "examples": {
+                "step1": {
+                  "summary": "Step 1 — name & gender",
+                  "value": { "step": 1, "name": "Priya Sharma", "gender": "female" }
+                },
+                "step2": {
+                  "summary": "Step 2 — address & pin",
+                  "value": {
+                    "step": 2,
+                    "address_label": "Home",
+                    "address_formatted": "123 Main Street, Andheri West, Mumbai - 400058",
+                    "latitude": 19.1364,
+                    "longitude": 72.8296
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Step saved; returns updated user profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessOnboarding"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "403": {
+            "description": "Phone not verified",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "409": {
+            "description": "Wrong step order or onboarding already finished",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "JWT from POST /auth/verify (Authorization: Bearer <token>)"
+      }
+    },
     "examples": {
       "phoneWithPlus91": {
         "summary": "With +91 (India)",
@@ -274,6 +380,15 @@
           }
         }
       },
+      "OtpSentUser": {
+        "type": "object",
+        "description": "Minimal payload after register/login (OTP phase only)",
+        "required": ["id", "phone_number"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "phone_number": { "type": "string" }
+        }
+      },
       "PublicUser": {
         "type": "object",
         "description": "User profile (no OTP fields)",
@@ -283,11 +398,77 @@
           "is_active": { "type": "boolean" },
           "is_deleted": { "type": "boolean" },
           "is_verified": { "type": "boolean" },
+          "name": { "type": "string", "nullable": true },
+          "gender": {
+            "type": "string",
+            "nullable": true,
+            "enum": ["male", "female", "other"]
+          },
+          "address_label": { "type": "string", "nullable": true },
+          "address_formatted": { "type": "string", "nullable": true },
+          "latitude": { "type": "number", "format": "double", "nullable": true },
+          "longitude": { "type": "number", "format": "double", "nullable": true },
+          "is_onboarding_completed": {
+            "type": "boolean",
+            "description": "If false, show onboarding; use onboarding_step for which screen."
+          },
+          "onboarding_step": {
+            "type": "integer",
+            "enum": [1, 2],
+            "description": "1 = name & gender; 2 = address (until is_onboarding_completed is true)."
+          },
           "created_at": { "type": "string", "format": "date-time" },
           "updated_at": { "type": "string", "format": "date-time" }
         }
       },
+      "OnboardingStep1": {
+        "type": "object",
+        "required": ["step", "name", "gender"],
+        "properties": {
+          "step": { "type": "integer", "enum": [1] },
+          "name": { "type": "string", "maxLength": 200 },
+          "gender": { "type": "string", "enum": ["male", "female", "other"] }
+        }
+      },
+      "OnboardingStep2": {
+        "type": "object",
+        "required": ["step", "address_formatted", "latitude", "longitude"],
+        "properties": {
+          "step": { "type": "integer", "enum": [2] },
+          "address_label": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "Defaults to Home if omitted"
+          },
+          "address_formatted": { "type": "string" },
+          "latitude": { "type": "number", "format": "double", "minimum": -90, "maximum": 90 },
+          "longitude": { "type": "number", "format": "double", "minimum": -180, "maximum": 180 }
+        }
+      },
+      "OnboardingBody": {
+        "oneOf": [
+          { "$ref": "#/components/schemas/OnboardingStep1" },
+          { "$ref": "#/components/schemas/OnboardingStep2" }
+        ],
+        "discriminator": {
+          "propertyName": "step",
+          "mapping": {
+            "1": "#/components/schemas/OnboardingStep1",
+            "2": "#/components/schemas/OnboardingStep2"
+          }
+        }
+      },
       "SuccessOtpSent": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "message": { "type": "string" },
+          "data": {
+            "$ref": "#/components/schemas/OtpSentUser"
+          }
+        }
+      },
+      "SuccessOnboarding": {
         "type": "object",
         "properties": {
           "success": { "type": "boolean", "example": true },
@@ -299,7 +480,7 @@
       },
       "VerifySuccessData": {
         "type": "object",
-        "required": ["token", "user", "flow"],
+        "required": ["token", "user", "flow", "is_onboarding_completed", "onboarding_step"],
         "properties": {
           "token": {
             "type": "string",
@@ -311,7 +492,16 @@
           "flow": {
             "type": "string",
             "enum": ["registration", "login"],
-            "description": "registration = first-time verify; login = verified user sign-in"
+            "description": "registration = first-time verify; login = returning user sign-in."
+          },
+          "is_onboarding_completed": {
+            "type": "boolean",
+            "description": "Duplicate of user.is_onboarding_completed for quick routing after verify."
+          },
+          "onboarding_step": {
+            "type": "integer",
+            "enum": [1, 2],
+            "description": "Which onboarding screen to show when is_onboarding_completed is false."
           }
         }
       },

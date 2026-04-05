@@ -25,3 +25,18 @@ export function signAccessToken(payload: AccessTokenPayload): string {
         { expiresIn: expiresIn as jwt.SignOptions['expiresIn'] },
     );
 }
+
+export function verifyAccessToken(token: string): AccessTokenPayload {
+    const secret = process.env.JWT_SECRET;
+    if (!secret) {
+        throw new MissingJwtSecretError();
+    }
+    const decoded = jwt.verify(token, secret) as jwt.JwtPayload & { phone_number?: string };
+    if (typeof decoded.sub !== 'string') {
+        throw new jwt.JsonWebTokenError('Invalid token subject');
+    }
+    return {
+        sub: decoded.sub,
+        phone_number: typeof decoded.phone_number === 'string' ? decoded.phone_number : '',
+    };
+}
