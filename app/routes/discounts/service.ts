@@ -105,4 +105,35 @@ class discountService {
     };
 }
 
+/** For booking coupon apply — returns DB row when code is valid and has redemption capacity. */
+export async function loadApplicableDiscountRow(
+    rawCode: string,
+): Promise<
+    | { ok: true; row: Discount }
+    | { ok: false; message: string; code: 'INVALID' | 'NOT_FOUND' | 'SERVER' }
+> {
+    const code = rawCode?.trim().toUpperCase();
+    if (!code) {
+        return { ok: false, message: 'Discount code is required.', code: 'INVALID' };
+    }
+    try {
+        const row = await prisma.discount.findUnique({ where: { code } });
+        if (!row) {
+            return { ok: false, message: 'Invalid or unknown discount code.', code: 'NOT_FOUND' };
+        }
+        const now = new Date();
+        if (!isDiscountCurrentlyValid(row, now)) {
+            return {
+                ok: false,
+                message: 'This discount is not valid or no longer available.',
+                code: 'INVALID',
+            };
+        }
+        return { ok: true, row };
+    } catch (e) {
+        console.error('[discounts] loadApplicableDiscountRow', e);
+        return { ok: false, message: 'Could not validate coupon.', code: 'SERVER' };
+    }
+}
+
 export default discountService;

@@ -25,6 +25,7 @@ model Users {
   otp_expires_at DateTime?
 
   addresses Address[]
+  bookings  Booking[]
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -46,6 +47,8 @@ model Address {
   is_default Boolean  @default(false)
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
+
+  bookings Booking[]
 
   @@index([user_id])
   @@map("addresses")
@@ -71,6 +74,8 @@ model Discount {
   created_at        DateTime @default(now())
   updated_at        DateTime @updatedAt
 
+  bookings Booking[]
+
   @@map("discounts")
 }
 
@@ -89,6 +94,7 @@ model Service {
   is_active   Boolean  @default(true)
   is_deleted  Boolean  @default(false)
   slots       Slot[]
+  bookings    Booking[]
   created_at  DateTime @default(now())
   updated_at  DateTime @updatedAt
 
@@ -113,6 +119,8 @@ model Slot {
   created_at       DateTime @default(now())
   updated_at       DateTime @updatedAt
 
+  bookings Booking[]
+
   @@unique([service_id, slot_type, duration_minutes])
   @@index([service_id])
   @@map("slots")
@@ -121,4 +129,59 @@ model Slot {
 enum SlotType {
   instant
   scheduled
+}
+
+/// Lifecycle: CREATED → ACCEPTED | REJECTED | CANCELLED → … → COMPLETED
+enum BookingStatus {
+  CREATED
+  ACCEPTED
+  REJECTED
+  ASSIGNING_STAFF
+  STAFF_EN_ROUTE
+  ARRIVED
+  COMPLETED
+  CANCELLED
+}
+
+model Booking {
+  id      String @id @default(uuid())
+  user_id String
+  user    Users  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  service_id String
+  service    Service @relation(fields: [service_id], references: [id], onDelete: Restrict)
+
+  slot_id String
+  slot    Slot @relation(fields: [slot_id], references: [id], onDelete: Restrict)
+
+  address_id String
+  address    Address @relation(fields: [address_id], references: [id], onDelete: Restrict)
+
+  status BookingStatus @default(CREATED)
+
+  /// Slot price at booking time
+  service_charge Decimal @db.Decimal(12, 2)
+  platform_fee   Decimal @db.Decimal(12, 2)
+  discount_amount Decimal @default(0) @db.Decimal(12, 2)
+  total_amount    Decimal @db.Decimal(12, 2)
+
+  discount_id          String?
+  discount             Discount? @relation(fields: [discount_id], references: [id], onDelete: SetNull)
+  applied_coupon_code  String?
+
+  payment_method String?
+  staff_name     String?
+
+  scheduled_at DateTime?
+
+  rating         Int?
+  rating_comment String?
+  rated_at       DateTime?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([user_id])
+  @@index([status])
+  @@map("bookings")
 }

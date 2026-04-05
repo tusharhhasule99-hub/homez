@@ -3,7 +3,7 @@
   "info": {
     "title": "HomeZ API",
     "version": "1.0.0",
-    "description": "HomeZ backend HTTP API.\n\n## Phone auth (OTP + JWT)\n\n**Register** — `POST /auth/register` with `phone_number` only: creates an unverified row (or resends OTP) and sends a **6-digit OTP** (10-minute expiry). Response returns **only** `id` and `phone_number` (no profile yet).\n\n**Verify** — `POST /auth/verify` with `phone_number` and `otp`: message **Verified.** and a **JWT**. Payload includes `is_onboarding_completed`, `onboarding_step`, and full `user` for routing: if `is_onboarding_completed` is `false`, open onboarding; otherwise go to home.\n\n**Login** — `POST /auth/login` then `POST /auth/verify` same as above.\n\n**Onboarding** — `POST /auth/onboarding` with `Authorization: Bearer <JWT>`. **1** — `name`, `gender`. **2** — structured service location saved as the user’s first **`addresses`** row (`line1`, `area`, `city`, `pincode`, `latitude`, `longitude`, optional `label`; same rules as `POST /addresses`). If the user already has 3 saved addresses, step 2 only marks onboarding complete. Then `is_onboarding_completed` is `true`.\n\n**Discounts** — `GET /discounts` and `GET /discounts/code/{code}` require the same Bearer JWT.\n\n**Services** — `GET /services` and `GET /services/{id}` require `Authorization: Bearer <JWT>`. Query **`slot_type`**: `instant` (default), `scheduled`, or `all`. With `include_slots=true` on the list, `slots` is a filtered array; each slot includes its `slot_type`.\n\n**Addresses** — `GET/POST /addresses`, `GET/PATCH/DELETE /addresses/{id}` require JWT. **Max 3 saved addresses** per user; first address is default unless you set `is_default`.\n\nIndian numbers: you may send `phone_number` with or without `+91`; `+91` is stripped before storage."
+    "description": "HomeZ backend HTTP API.\n\n## Phone auth (OTP + JWT)\n\n**Register** — `POST /auth/register` with `phone_number` only: creates an unverified row (or resends OTP) and sends a **6-digit OTP** (10-minute expiry). Response returns **only** `id` and `phone_number` (no profile yet).\n\n**Verify** — `POST /auth/verify` with `phone_number` and `otp`: message **Verified.** and a **JWT**. Payload includes `is_onboarding_completed`, `onboarding_step`, and full `user` for routing: if `is_onboarding_completed` is `false`, open onboarding; otherwise go to home.\n\n**Login** — `POST /auth/login` then `POST /auth/verify` same as above.\n\n**Onboarding** — `POST /auth/onboarding` with `Authorization: Bearer <JWT>`. **1** — `name`, `gender`. **2** — structured service location saved as the user’s first **`addresses`** row (`line1`, `area`, `city`, `pincode`, `latitude`, `longitude`, optional `label`; same rules as `POST /addresses`). If the user already has 3 saved addresses, step 2 only marks onboarding complete. Then `is_onboarding_completed` is `true`.\n\n**Discounts** — `GET /discounts` and `GET /discounts/code/{code}` require the same Bearer JWT.\n\n**Services** — `GET /services` and `GET /services/{id}` require `Authorization: Bearer <JWT>`. Query **`slot_type`**: `instant` (default), `scheduled`, or `all`. With `include_slots=true` on the list, `slots` is a filtered array; each slot includes its `slot_type`.\n\n**Addresses** — `GET/POST /addresses`, `GET/PATCH/DELETE /addresses/{id}` require JWT. **Max 3 saved addresses** per user; first address is default unless you set `is_default`.\n\n**Bookings** — `GET/POST /bookings`, `GET /bookings/{id}`, `POST /bookings/{id}/coupon`, `PATCH /bookings/{id}/status`, `POST /bookings/{id}/rating` require JWT. Create with `service_id`, `slot_id`, `address_id` (address must belong to the user; slot must belong to the service). **Status** on the booking may be `CREATED`, `ACCEPTED`, `REJECTED`, `ASSIGNING_STAFF`, `STAFF_EN_ROUTE`, `ARRIVED`, `COMPLETED`, or `CANCELLED`. **Users** may only use `PATCH /bookings/{id}/status` to **cancel** (`status: CANCELLED`) when the booking is not already terminal. Coupon apply only in `CREATED` and only once. Rating only when `COMPLETED` and not yet rated.\n\nIndian numbers: you may send `phone_number` with or without `+91`; `+91` is stripped before storage."
   },
   "servers": [
     {
@@ -32,6 +32,10 @@
     {
       "name": "Addresses",
       "description": "User saved addresses for checkout (Bearer JWT); max 3 per user"
+    },
+    {
+      "name": "Bookings",
+      "description": "Service bookings, coupons, lifecycle status, and ratings (Bearer JWT)"
     }
   ],
   "paths": {
@@ -822,6 +826,383 @@
           }
         }
       }
+    },
+    "/bookings": {
+      "get": {
+        "tags": ["Bookings"],
+        "summary": "List my bookings",
+        "description": "Newest first. Each item includes nested `service`, `slot`, and `address` summaries.",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SuccessBookingList" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Bookings"],
+        "summary": "Create a booking",
+        "description": "Snapshots slot price as `service_charge` and adds `platform_fee` (env `PLATFORM_FEE_INR`, default 20). Initial status is `CREATED`.",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/BookingCreateBody" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SuccessBookingOne" }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Address or slot/service mismatch",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bookings/{id}": {
+      "get": {
+        "tags": ["Bookings"],
+        "summary": "Get one booking",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SuccessBookingOne" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bookings/{id}/coupon": {
+      "post": {
+        "tags": ["Bookings"],
+        "summary": "Apply a coupon code",
+        "description": "Only when status is `CREATED` and no coupon applied yet. Updates `discount_amount` and `total_amount`.",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/BookingCouponBody" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Coupon applied",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SuccessBookingOne" }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Booking or code not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "409": {
+            "description": "Coupon already applied",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "422": {
+            "description": "Wrong booking state or invalid discount",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bookings/{id}/status": {
+      "patch": {
+        "tags": ["Bookings"],
+        "summary": "Cancel a booking",
+        "description": "Customers may only set `status` to `CANCELLED`. Fails if the booking is already `REJECTED`, `COMPLETED`, or `CANCELLED`, or if cancellation is not allowed from the current state.",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/BookingStatusPatchBody" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SuccessBookingOne" }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "409": {
+            "description": "Invalid transition or terminal booking",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bookings/{id}/rating": {
+      "post": {
+        "tags": ["Bookings"],
+        "summary": "Rate a completed booking",
+        "description": "Only when status is `COMPLETED` and `rating` is not already set. One submission per booking.",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/BookingRatingBody" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SuccessBookingOne" }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "409": {
+            "description": "Already rated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "422": {
+            "description": "Booking not completed",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1184,6 +1565,129 @@
               "id": { "type": "string", "format": "uuid" }
             }
           }
+        }
+      },
+      "BookingStatus": {
+        "type": "string",
+        "enum": [
+          "CREATED",
+          "ACCEPTED",
+          "REJECTED",
+          "ASSIGNING_STAFF",
+          "STAFF_EN_ROUTE",
+          "ARRIVED",
+          "COMPLETED",
+          "CANCELLED"
+        ]
+      },
+      "PublicBookingService": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "title": { "type": "string" }
+        }
+      },
+      "PublicBookingSlot": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "duration_label": { "type": "string" },
+          "slot_type": { "type": "string", "enum": ["instant", "scheduled"] }
+        }
+      },
+      "PublicBookingAddress": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "label": { "type": "string" },
+          "line1": { "type": "string" },
+          "area": { "type": "string" },
+          "city": { "type": "string" },
+          "pincode": { "type": "string" }
+        }
+      },
+      "PublicBooking": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "user_id": { "type": "string", "format": "uuid" },
+          "status": { "$ref": "#/components/schemas/BookingStatus" },
+          "service_charge": { "type": "number", "format": "double" },
+          "platform_fee": { "type": "number", "format": "double" },
+          "discount_amount": { "type": "number", "format": "double" },
+          "total_amount": { "type": "number", "format": "double" },
+          "applied_coupon_code": { "type": "string", "nullable": true },
+          "payment_method": {
+            "type": "string",
+            "nullable": true,
+            "description": "When set: UPI, CARD, or WALLET"
+          },
+          "staff_name": { "type": "string", "nullable": true },
+          "scheduled_at": { "type": "string", "format": "date-time", "nullable": true },
+          "rating": { "type": "integer", "minimum": 1, "maximum": 5, "nullable": true },
+          "rating_comment": { "type": "string", "nullable": true },
+          "rated_at": { "type": "string", "format": "date-time", "nullable": true },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" },
+          "service": { "$ref": "#/components/schemas/PublicBookingService" },
+          "slot": { "$ref": "#/components/schemas/PublicBookingSlot" },
+          "address": { "$ref": "#/components/schemas/PublicBookingAddress" }
+        }
+      },
+      "BookingCreateBody": {
+        "type": "object",
+        "required": ["service_id", "slot_id", "address_id"],
+        "properties": {
+          "service_id": { "type": "string", "format": "uuid" },
+          "slot_id": { "type": "string", "format": "uuid" },
+          "address_id": { "type": "string", "format": "uuid" },
+          "payment_method": { "type": "string", "enum": ["UPI", "CARD", "WALLET"] },
+          "scheduled_at": { "type": "string", "format": "date-time", "description": "Optional ISO datetime for scheduled slots" }
+        }
+      },
+      "BookingCouponBody": {
+        "type": "object",
+        "required": ["code"],
+        "properties": {
+          "code": { "type": "string", "description": "Promo code (case-insensitive)" }
+        }
+      },
+      "BookingStatusPatchBody": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["CANCELLED"],
+            "description": "Must be CANCELLED (only action allowed for the authenticated customer)"
+          }
+        }
+      },
+      "BookingRatingBody": {
+        "type": "object",
+        "required": ["rating"],
+        "properties": {
+          "rating": { "type": "integer", "minimum": 1, "maximum": 5 },
+          "comment": { "type": "string", "maxLength": 2000 }
+        }
+      },
+      "SuccessBookingList": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "message": { "type": "string" },
+          "data": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/PublicBooking" }
+          }
+        }
+      },
+      "SuccessBookingOne": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "message": { "type": "string" },
+          "data": { "$ref": "#/components/schemas/PublicBooking" }
         }
       },
       "Error": {
