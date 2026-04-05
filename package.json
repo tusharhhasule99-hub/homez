@@ -3,7 +3,8 @@
   "scripts": {
     "build": "prisma generate && node app/utils/safeBuild.mjs",
     "dev": "prisma generate && nodemon",
-    "start": "node dist/app.js"
+    "start": "node dist/app.js",
+    "db:seed": "prisma db seed"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.6.0",

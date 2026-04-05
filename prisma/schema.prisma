@@ -33,4 +33,26 @@ model Users {
 
   @@map("users")
 }
-  
+
+model Discount {
+  id                String    @id @default(uuid())
+  title             String
+  code              String    @unique
+  /// Percentage off (e.g. 50 = 50%). Omit if using only a fixed amount.
+  percentage        Int?
+  /// Fixed currency amount off. Omit if using only percentage. Both may be set if product rules allow.
+  amount            Decimal?  @db.Decimal(12, 2)
+  expires_at        DateTime
+  /// Max redemptions across all users (e.g. 100 for “first 100”). Null = unlimited.
+  usage_limit_total Int?
+  /// How many times this code has been applied (increment at booking time).
+  usage_count       Int       @default(0)
+  /// Display text e.g. "First 100 bookings", "First booking only"
+  limit_label       String?
+  is_active         Boolean   @default(true)
+  is_deleted        Boolean   @default(false)
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  @@map("discounts")
+}

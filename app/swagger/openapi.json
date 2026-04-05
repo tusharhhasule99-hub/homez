@@ -3,7 +3,7 @@
   "info": {
     "title": "HomeZ API",
     "version": "1.0.0",
-    "description": "HomeZ backend HTTP API.\n\n## Phone auth (OTP + JWT)\n\n**Register** — `POST /auth/register` with `phone_number` only: creates an unverified row (or resends OTP) and sends a **6-digit OTP** (10-minute expiry). Response returns **only** `id` and `phone_number` (no profile yet).\n\n**Verify** — `POST /auth/verify` with `phone_number` and `otp`: message **Verified.** and a **JWT**. Payload includes `is_onboarding_completed`, `onboarding_step`, and full `user` for routing: if `is_onboarding_completed` is `false`, open onboarding; otherwise go to home.\n\n**Login** — `POST /auth/login` then `POST /auth/verify` same as above.\n\n**Onboarding** — `POST /auth/onboarding` with `Authorization: Bearer <JWT>`. Two steps: **1** — `name`, `gender` (`male` | `female` | `other`). **2** — `address_formatted`, optional `address_label` (default `Home`), `latitude`, `longitude`. After step 2, `is_onboarding_completed` becomes `true`.\n\nIndian numbers: you may send `phone_number` with or without `+91`; `+91` is stripped before storage."
+    "description": "HomeZ backend HTTP API.\n\n## Phone auth (OTP + JWT)\n\n**Register** — `POST /auth/register` with `phone_number` only: creates an unverified row (or resends OTP) and sends a **6-digit OTP** (10-minute expiry). Response returns **only** `id` and `phone_number` (no profile yet).\n\n**Verify** — `POST /auth/verify` with `phone_number` and `otp`: message **Verified.** and a **JWT**. Payload includes `is_onboarding_completed`, `onboarding_step`, and full `user` for routing: if `is_onboarding_completed` is `false`, open onboarding; otherwise go to home.\n\n**Login** — `POST /auth/login` then `POST /auth/verify` same as above.\n\n**Onboarding** — `POST /auth/onboarding` with `Authorization: Bearer <JWT>`. Two steps: **1** — `name`, `gender` (`male` | `female` | `other`). **2** — `address_formatted`, optional `address_label` (default `Home`), `latitude`, `longitude`. After step 2, `is_onboarding_completed` becomes `true`.\n\n**Discounts** — `GET /discounts` and `GET /discounts/code/{code}` require the same Bearer JWT.\n\nIndian numbers: you may send `phone_number` with or without `+91`; `+91` is stripped before storage."
   },
   "servers": [
     {
@@ -20,6 +20,10 @@
     {
       "name": "Onboarding",
       "description": "Profile and address steps after phone verification (Bearer JWT)"
+    },
+    {
+      "name": "Discounts",
+      "description": "Promo codes (Bearer JWT from /auth/verify)"
     }
   ],
   "paths": {
@@ -326,6 +330,103 @@
           }
         }
       }
+    },
+    "/discounts": {
+      "get": {
+        "tags": ["Discounts"],
+        "summary": "List available discounts",
+        "description": "Requires `Authorization: Bearer <JWT>`. Only `is_active: true`, `is_deleted: false`, unexpired discounts. If `usage_limit_total` is set, rows where `usage_count` has reached that cap are omitted. If `usage_limit_total` is null, unlimited until expiry. Increment `usage_count` when a booking applies the code.",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "List of discounts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessDiscountList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/discounts/code/{code}": {
+      "get": {
+        "tags": ["Discounts"],
+        "summary": "Look up a discount by code",
+        "description": "Requires `Authorization: Bearer <JWT>`. Code is matched case-insensitively (stored uppercase). Returns 404 if unknown, 400 if expired or sold out.",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "example": "FIRST50"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Discount is valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessDiscountOne"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Expired, inactive, or usage limit reached",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown code",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -517,6 +618,52 @@
           "data": {
             "$ref": "#/components/schemas/VerifySuccessData"
           }
+        }
+      },
+      "PublicDiscount": {
+        "type": "object",
+        "description": "percentage and/or amount may be set; both null would be invalid in practice.",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "title": { "type": "string" },
+          "code": { "type": "string" },
+          "percentage": { "type": "integer", "nullable": true, "description": "Percent off, e.g. 50" },
+          "amount": { "type": "number", "format": "double", "nullable": true, "description": "Fixed amount off" },
+          "expires_at": { "type": "string", "format": "date-time" },
+          "usage_limit_total": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Max uses globally; null = unlimited"
+          },
+          "uses_remaining": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Slots left; null when unlimited"
+          },
+          "limit_label": {
+            "type": "string",
+            "nullable": true,
+            "description": "Marketing copy e.g. First 100 bookings"
+          }
+        }
+      },
+      "SuccessDiscountList": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "message": { "type": "string" },
+          "data": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/PublicDiscount" }
+          }
+        }
+      },
+      "SuccessDiscountOne": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "message": { "type": "string" },
+          "data": { "$ref": "#/components/schemas/PublicDiscount" }
         }
       },
       "Error": {
