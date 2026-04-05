@@ -2,6 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
+import swaggerUi from 'swagger-ui-express';
+import openapiDocument from './app/swagger/openapi.json';
 dotenv.config();
 
 import routes from './app/routes/routes';
@@ -11,6 +13,11 @@ const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
+app.use(
+    '/api-docs',
+    swaggerUi.serve,
+    swaggerUi.setup(openapiDocument as Record<string, unknown>, { explorer: true }),
+);
 app.use(helmet());
 
 app.get('/health', (_req, res) => {

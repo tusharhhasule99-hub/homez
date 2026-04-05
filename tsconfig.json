@@ -12,6 +12,6 @@
     "sourceMap": true,
     "noEmitOnError": true
   },
-  "include": ["app.ts", "app/**/*.ts", "prisma.config.ts"],
+  "include": ["app.ts", "app/**/*.ts", "app/**/*.json", "prisma.config.ts"],
   "exclude": ["node_modules", "dist", "dist_tmp"]
 }

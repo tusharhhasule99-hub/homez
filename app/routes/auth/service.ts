@@ -43,7 +43,39 @@ class authService {
                 code: 'INTERNAL_SERVER_ERROR',
             };
         }
-    }
+    };
+
+    login = async (phone_number: string) => {
+        try {
+            const user = await prisma.users.findFirst({
+                where: {
+                    phone_number: phone_number,
+                    is_active: true,
+                    is_deleted: false,
+                    is_verified: true,
+                },
+            });
+            if (!user) {
+                return {
+                    success: false,
+                    message: 'User not found. Please register to continue.',
+                };
+            }
+
+            return {
+                success: true,
+                message: 'Login successful.',
+                data: user,
+            };
+        } catch (error) {
+            console.error('Error in login service :: Internal server error', error);
+            return {
+                success: false,
+                message: 'Internal server error. Please try again later.',
+                code: 'INTERNAL_SERVER_ERROR',
+            };
+        }
+    };
 }
 
 export default authService;

@@ -25,7 +25,26 @@ class authController {
             console.error("Error in register :: Internal server error", error);
             return sendError(res, 500, 'Internal server error', 'INTERNAL_SERVER_ERROR');
         }
-    }
+    };
+
+    login = async (req: express.Request, res: express.Response) => {
+        try {
+            const { phone_number } = req.body;
+            if (!phone_number) {
+                return sendError(res, 400, 'Phone number is required');
+            }
+
+            const result = await this.authService.login(phone_number);
+            if (!result.success) {
+                return sendError(res, 400, result.message, result.code);
+            }
+
+            return sendSuccess(res, 200, result.message, result.data);
+        } catch (error) {
+            console.error('Error in login :: Internal server error', error);
+            return sendError(res, 500, 'Internal server error', 'INTERNAL_SERVER_ERROR');
+        }
+    };
 }
 
 export default authController;
