@@ -33,6 +33,32 @@ model Users {
   @@map("users")
 }
 
+model Staff {
+  id           String @id @default(uuid())
+  phone_number String @unique
+  name         String
+  gender       String?
+  role_title   String?
+
+  is_active          Boolean @default(true)
+  is_deleted         Boolean @default(false)
+  is_phone_verified  Boolean @default(false)
+  is_photo_verified  Boolean @default(false)
+  is_docs_verified   Boolean @default(false)
+  kyc_status         StaffKycStatus @default(PENDING)
+
+  profile_photo_url String?
+  docs              Json     @default("[]")
+
+  otp_hash       String?
+  otp_expires_at DateTime?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@map("staff")
+}
+
 model Address {
   id         String   @id @default(uuid())
   user_id    String
@@ -126,23 +152,6 @@ model Slot {
   @@map("slots")
 }
 
-enum SlotType {
-  instant
-  scheduled
-}
-
-/// Lifecycle: CREATED → ACCEPTED | REJECTED | CANCELLED → … → COMPLETED
-enum BookingStatus {
-  CREATED
-  ACCEPTED
-  REJECTED
-  ASSIGNING_STAFF
-  STAFF_EN_ROUTE
-  ARRIVED
-  COMPLETED
-  CANCELLED
-}
-
 model Booking {
   id      String @id @default(uuid())
   user_id String
@@ -184,4 +193,28 @@ model Booking {
   @@index([user_id])
   @@index([status])
   @@map("bookings")
+}
+
+
+enum SlotType {
+  instant
+  scheduled
+}
+
+/// Lifecycle: CREATED → ACCEPTED | REJECTED | CANCELLED → … → COMPLETED
+enum BookingStatus {
+  CREATED
+  ACCEPTED
+  REJECTED
+  ASSIGNING_STAFF
+  STAFF_EN_ROUTE
+  ARRIVED
+  COMPLETED
+  CANCELLED
+}
+
+enum StaffKycStatus {
+  PENDING
+  VERIFIED
+  REJECTED
 }
