@@ -1,6 +1,6 @@
 import type { Users } from '../../generated/prisma/client';
 
-/** Returned from register/login (OTP sent only) — phone enrollment, no profile. */
+/** Returned from login/resend OTP (OTP sent only) — phone enrollment, no profile. */
 const otpSentUserSelect = {
     id: true,
     phone_number: true,

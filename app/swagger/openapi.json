@@ -3,7 +3,7 @@
   "info": {
     "title": "HomeZ API",
     "version": "1.0.0",
-    "description": "HomeZ backend HTTP API.\n\n## Phone auth (OTP + JWT)\n\n**Register** — `POST /auth/register` with `phone_number` only: creates an unverified row (or resends OTP) and sends a **6-digit OTP** (10-minute expiry). Response returns **only** `id` and `phone_number` (no profile yet).\n\n**Verify** — `POST /auth/verify` with `phone_number` and `otp`: message **Verified.** and a **JWT**. Payload includes `is_onboarding_completed`, `onboarding_step`, and full `user` for routing: if `is_onboarding_completed` is `false`, open onboarding; otherwise go to home.\n\n**Login** — `POST /auth/login` then `POST /auth/verify` same as above.\n\n**Onboarding** — `POST /auth/onboarding` with `Authorization: Bearer <JWT>`. **1** — `name`, `gender`. **2** — structured service location saved as the user’s first **`addresses`** row (`line1`, `area`, `city`, `pincode`, `latitude`, `longitude`, optional `label`; same rules as `POST /addresses`). If the user already has 3 saved addresses, step 2 only marks onboarding complete. Then `is_onboarding_completed` is `true`.\n\n**Discounts** — `GET /discounts` and `GET /discounts/code/{code}` require the same Bearer JWT.\n\n**Services** — `GET /services` and `GET /services/{id}` require `Authorization: Bearer <JWT>`. Query **`slot_type`**: `instant` (default), `scheduled`, or `all`. With `include_slots=true` on the list, `slots` is a filtered array; each slot includes its `slot_type`.\n\n**Addresses** — `GET/POST /addresses`, `GET/PATCH/DELETE /addresses/{id}` require JWT. **Max 3 saved addresses** per user; first address is default unless you set `is_default`.\n\n**Bookings** — `GET/POST /bookings`, `GET /bookings/{id}`, `POST /bookings/{id}/coupon`, `PATCH /bookings/{id}/status`, `POST /bookings/{id}/rating` require JWT. Create with `service_id`, `slot_id`, `address_id` (address must belong to the user; slot must belong to the service). **Status** on the booking may be `CREATED`, `ACCEPTED`, `REJECTED`, `ASSIGNING_STAFF`, `STAFF_EN_ROUTE`, `ARRIVED`, `COMPLETED`, or `CANCELLED`. **Users** may only use `PATCH /bookings/{id}/status` to **cancel** (`status: CANCELLED`) when the booking is not already terminal. Coupon apply only in `CREATED` and only once. Rating only when `COMPLETED` and not yet rated.\n\nIndian numbers: you may send `phone_number` with or without `+91`; `+91` is stripped before storage."
+    "description": "HomeZ backend HTTP API.\n\n## Phone auth (OTP + JWT)\n\n**Login** — `POST /auth/login` with `phone_number` only: sends a **6-digit OTP** (10-minute expiry). If the phone is new, user is auto-created in unverified state. Response returns **only** `id` and `phone_number`.\n\n**Resend OTP** — `POST /auth/resend-otp` with `phone_number`: reissues OTP for an existing user.\n\n**Verify** — `POST /auth/verify` with `phone_number` and `otp`: message **Verified.** and a **JWT**. Payload includes `is_onboarding_completed`, `onboarding_step`, and full `user` for routing: if `is_onboarding_completed` is `false`, open onboarding; otherwise go to home.\n\n**Get User** — `GET /auth/user` with `Authorization: Bearer <JWT>`: returns current user profile and onboarding flags for app boot routing.\n\n**Onboarding** — `POST /auth/onboarding` with `Authorization: Bearer <JWT>`. **1** — `name`, `gender`. **2** — structured service location saved as the user’s first **`addresses`** row (`line1`, `area`, `city`, `pincode`, `latitude`, `longitude`, optional `label`; same rules as `POST /addresses`). If the user already has 3 saved addresses, step 2 only marks onboarding complete. Then `is_onboarding_completed` is `true`.\n\n**Discounts** — `GET /discounts` and `GET /discounts/code/{code}` require the same Bearer JWT.\n\n**Services** — `GET /services` and `GET /services/{id}` require `Authorization: Bearer <JWT>`. Query **`slot_type`**: `instant` (default), `scheduled`, or `all`. With `include_slots=true` on the list, `slots` is a filtered array; each slot includes its `slot_type`.\n\n**Addresses** — `GET/POST /addresses`, `GET/PATCH/DELETE /addresses/{id}` require JWT. **Max 3 saved addresses** per user; first address is default unless you set `is_default`.\n\n**Bookings** — `GET/POST /bookings`, `GET /bookings/{id}`, `POST /bookings/{id}/coupon`, `PATCH /bookings/{id}/status`, `POST /bookings/{id}/rating` require JWT. Create with `service_id`, `slot_id`, `address_id` (address must belong to the user; slot must belong to the service). **Status** on the booking may be `CREATED`, `ACCEPTED`, `REJECTED`, `ASSIGNING_STAFF`, `STAFF_EN_ROUTE`, `ARRIVED`, `COMPLETED`, or `CANCELLED`. **Users** may only use `PATCH /bookings/{id}/status` to **cancel** (`status: CANCELLED`) when the booking is not already terminal. Coupon apply only in `CREATED` and only once. Rating only when `COMPLETED` and not yet rated.\n\nIndian numbers: you may send `phone_number` with or without `+91`; `+91` is stripped before storage."
   },
   "servers": [
     {
@@ -15,7 +15,7 @@
   "tags": [
     {
       "name": "Auth",
-      "description": "OTP-based registration, login, and verify (JWT)"
+      "description": "OTP-based login, resend, verify, and profile fetch (JWT)"
     },
     {
       "name": "Onboarding",
@@ -39,89 +39,11 @@
     }
   ],
   "paths": {
-    "/auth/register": {
-      "post": {
-        "tags": ["Auth"],
-        "summary": "Start registration — sends OTP",
-        "description": "Creates an unverified user (or resends OTP). Returns only `id` and `phone_number`. No JWT until verify.",
-        "security": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PhoneBody"
-              },
-              "examples": {
-                "with_plus91": {
-                  "$ref": "#/components/examples/phoneWithPlus91"
-                },
-                "national_number": {
-                  "$ref": "#/components/examples/phoneNational"
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "New user created; OTP sent",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SuccessOtpSent"
-                }
-              }
-            }
-          },
-          "200": {
-            "description": "Existing unverified user; OTP resent",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SuccessOtpSent"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation or business error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Server misconfiguration (e.g. missing OTP secret)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Server error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/auth/login": {
       "post": {
         "tags": ["Auth"],
-        "summary": "Start login — sends OTP",
-        "description": "Only for verified users. Sends OTP; response is only `id` and `phone_number`. Use verify for JWT.",
+        "summary": "Send OTP by phone number",
+        "description": "Single entrypoint for OTP auth. Sends OTP and auto-creates an unverified user if this number is new. Use verify for JWT.",
         "security": [],
         "requestBody": {
           "required": true,
@@ -185,11 +107,79 @@
         }
       }
     },
+    "/auth/resend-otp": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Resend OTP",
+        "description": "Resends OTP for an existing user phone number. In development mode OTP is static `123456`; in production a real OTP is sent.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhoneBody"
+              },
+              "examples": {
+                "with_plus91": {
+                  "$ref": "#/components/examples/phoneWithPlus91"
+                },
+                "national_number": {
+                  "$ref": "#/components/examples/phoneNational"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OTP resent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessOtpSent"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or business error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Server misconfiguration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/auth/verify": {
       "post": {
         "tags": ["Auth"],
         "summary": "Verify OTP — returns JWT",
-        "description": "Same endpoint after register or login. Message is **Verified.** Includes `is_onboarding_completed`, `onboarding_step`, and `user` so the client can open onboarding (step 1 or 2) or home.",
+        "description": "Verify OTP after login/resend flow. Message is **Verified.** Includes `is_onboarding_completed`, `onboarding_step`, and `user` so the client can open onboarding (step 1 or 2) or home.",
         "security": [],
         "requestBody": {
           "required": true,
@@ -243,6 +233,50 @@
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/user": {
+      "get": {
+        "tags": ["Auth"],
+        "summary": "Get current user profile",
+        "description": "Requires `Authorization: Bearer <JWT>`. Returns full user profile with onboarding flags.",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Current user details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessCurrentUser"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
               }
             }
           }
@@ -1251,7 +1285,7 @@
         "properties": {
           "phone_number": {
             "type": "string",
-            "description": "Same format as register/login."
+            "description": "Same format as login/resend-otp."
           },
           "otp": {
             "type": "string",
@@ -1263,7 +1297,7 @@
       },
       "OtpSentUser": {
         "type": "object",
-        "description": "Minimal payload after register/login (OTP phase only)",
+        "description": "Minimal payload after login/resend OTP (OTP phase only)",
         "required": ["id", "phone_number"],
         "properties": {
           "id": { "type": "string", "format": "uuid" },
@@ -1394,6 +1428,23 @@
           "data": {
             "$ref": "#/components/schemas/VerifySuccessData"
           }
+        }
+      },
+      "CurrentUserData": {
+        "type": "object",
+        "required": ["user", "is_onboarding_completed", "onboarding_step"],
+        "properties": {
+          "user": { "$ref": "#/components/schemas/PublicUser" },
+          "is_onboarding_completed": { "type": "boolean" },
+          "onboarding_step": { "type": "integer", "enum": [1, 2] }
+        }
+      },
+      "SuccessCurrentUser": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "message": { "type": "string" },
+          "data": { "$ref": "#/components/schemas/CurrentUserData" }
         }
       },
       "PublicDiscount": {

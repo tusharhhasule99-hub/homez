@@ -49,95 +49,6 @@ function normalizeGender(raw: unknown): string | null {
 class authService {
     constructor() {}
 
-    register = async (phone_number: string) => {
-        try {
-            const normalized = normalizePhoneForStorage(phone_number);
-            if (!normalized) {
-                return { success: false as const, message: 'Phone number is required', code: 'INVALID_PHONE_NUMBER' as const };
-            }
-
-            const verified = await prisma.users.findFirst({
-                where: {
-                    phone_number: normalized,
-                    is_active: true,
-                    is_deleted: false,
-                    is_verified: true,
-                },
-                select: { id: true },
-            });
-            if (verified) {
-                return {
-                    success: false as const,
-                    message: 'Account already exists. Use login to receive an OTP.',
-                    code: 'USER_ALREADY_EXISTS' as const,
-                };
-            }
-
-            const pending = await prisma.users.findFirst({
-                where: {
-                    phone_number: normalized,
-                    is_active: true,
-                    is_deleted: false,
-                    is_verified: false,
-                },
-            });
-
-            if (pending) {
-                await persistOtpAndSend(pending.id, normalized);
-                const user = await prisma.users.findUniqueOrThrow({
-                    where: { id: pending.id },
-                    select: otpSentUserSelect,
-                });
-                return {
-                    success: true as const,
-                    created: false as const,
-                    message: 'OTP sent. Verify your number to continue.',
-                    data: user,
-                };
-            }
-
-            const created = await prisma.users.create({
-                data: {
-                    phone_number: normalized,
-                    is_active: true,
-                    is_deleted: false,
-                    is_verified: false,
-                },
-            });
-            await persistOtpAndSend(created.id, normalized);
-            const user = await prisma.users.findUniqueOrThrow({
-                where: { id: created.id },
-                select: otpSentUserSelect,
-            });
-            return {
-                success: true as const,
-                created: true as const,
-                message: 'OTP sent. Verify your number to continue.',
-                data: user,
-            };
-        } catch (error) {
-            if (error instanceof MissingOtpSecretError) {
-                logAuthServiceError(
-                    'register',
-                    'persistOtpAndSend',
-                    'app/utils/otpCrypto.ts#hashOtp',
-                    error,
-                );
-                return {
-                    success: false as const,
-                    message: 'Server configuration error.',
-                    code: 'SERVER_CONFIG' as const,
-                };
-            }
-            logAuthServiceError('register', 'handler', 'app/routes/auth/service.ts', error);
-            return {
-                success: false as const,
-                message: 'Internal server error. Please try again later.',
-                code: 'INTERNAL_SERVER_ERROR' as const,
-            };
-        }
-    };
-
     login = async (phone_number: string) => {
         try {
             const normalized = normalizePhoneForStorage(phone_number);
@@ -150,19 +61,27 @@ class authService {
                     phone_number: normalized,
                     is_active: true,
                     is_deleted: false,
-                    is_verified: true,
                 },
             });
-            if (!user) {
-                return {
-                    success: false as const,
-                    message: 'No verified account for this number. Register first.',
-                };
-            }
 
-            await persistOtpAndSend(user.id, normalized);
+            const existingUserId = user?.id;
+            const targetUserId = existingUserId
+                ? existingUserId
+                : (
+                      await prisma.users.create({
+                          data: {
+                              phone_number: normalized,
+                              is_active: true,
+                              is_deleted: false,
+                              is_verified: false,
+                          },
+                          select: { id: true },
+                      })
+                  ).id;
+
+            await persistOtpAndSend(targetUserId, normalized);
             const slim: OtpSentUser = await prisma.users.findUniqueOrThrow({
-                where: { id: user.id },
+                where: { id: targetUserId },
                 select: otpSentUserSelect,
             });
             return {
@@ -193,6 +112,63 @@ class authService {
         }
     };
 
+    resendOtp = async (phone_number: string) => {
+        try {
+            const normalized = normalizePhoneForStorage(phone_number);
+            if (!normalized) {
+                return { success: false as const, message: 'Phone number is required' };
+            }
+
+            const user = await prisma.users.findFirst({
+                where: {
+                    phone_number: normalized,
+                    is_active: true,
+                    is_deleted: false,
+                },
+                select: { id: true },
+            });
+
+            if (!user) {
+                return {
+                    success: false as const,
+                    message: 'User not found for this phone number. Start login first.',
+                    code: 'USER_NOT_FOUND' as const,
+                };
+            }
+
+            await persistOtpAndSend(user.id, normalized);
+            const slim: OtpSentUser = await prisma.users.findUniqueOrThrow({
+                where: { id: user.id },
+                select: otpSentUserSelect,
+            });
+            return {
+                success: true as const,
+                message: 'OTP resent successfully.',
+                data: slim,
+            };
+        } catch (error) {
+            if (error instanceof MissingOtpSecretError) {
+                logAuthServiceError(
+                    'resendOtp',
+                    'persistOtpAndSend',
+                    'app/utils/otpCrypto.ts#hashOtp',
+                    error,
+                );
+                return {
+                    success: false as const,
+                    message: 'Server configuration error.',
+                    code: 'SERVER_CONFIG' as const,
+                };
+            }
+            logAuthServiceError('resendOtp', 'handler', 'app/routes/auth/service.ts', error);
+            return {
+                success: false as const,
+                message: 'Internal server error. Please try again later.',
+                code: 'INTERNAL_SERVER_ERROR' as const,
+            };
+        }
+    };
+
     verify = async (phone_number: string, otp: string) => {
         try {
             const normalized = normalizePhoneForStorage(phone_number);
@@ -209,13 +185,13 @@ class authService {
                 },
             });
             if (!user) {
-                return { success: false as const, message: 'User not found. Register first.' };
+                return { success: false as const, message: 'User not found. Start login first.' };
             }
 
             if (!user.otp_expires_at || user.otp_expires_at <= new Date()) {
                 return {
                     success: false as const,
-                    message: 'OTP expired or not requested. Request a new code from register or login.',
+                    message: 'OTP expired or not requested. Request a new OTP from login or resend OTP.',
                 };
             }
 
@@ -453,6 +429,44 @@ class authService {
             };
         } catch (error) {
             logAuthServiceError('submitOnboardingStep', 'handler', 'app/routes/auth/service.ts', error);
+            return {
+                success: false as const,
+                message: 'Internal server error. Please try again later.',
+                code: 'INTERNAL_SERVER_ERROR' as const,
+            };
+        }
+    };
+
+    getUser = async (userId: string) => {
+        try {
+            const user: PublicUser | null = await prisma.users.findFirst({
+                where: {
+                    id: userId,
+                    is_active: true,
+                    is_deleted: false,
+                },
+                select: publicUserSelect,
+            });
+
+            if (!user) {
+                return {
+                    success: false as const,
+                    message: 'User not found.',
+                    code: 'USER_NOT_FOUND' as const,
+                };
+            }
+
+            return {
+                success: true as const,
+                message: 'User fetched successfully.',
+                data: {
+                    user,
+                    is_onboarding_completed: user.is_onboarding_completed,
+                    onboarding_step: user.onboarding_step,
+                },
+            };
+        } catch (error) {
+            logAuthServiceError('getUser', 'handler', 'app/routes/auth/service.ts', error);
             return {
                 success: false as const,
                 message: 'Internal server error. Please try again later.',

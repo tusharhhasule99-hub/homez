@@ -1,9 +1,9 @@
 /**
  * One structured line for auth service failures, then the stack when available.
- * `operation` matches the HTTP handler (register / login / verify / onboarding) so logs match the request.
+ * `operation` matches the HTTP handler so logs match the request.
  */
 export function logAuthServiceError(
-    operation: 'register' | 'login' | 'verify' | 'submitOnboardingStep',
+    operation: 'login' | 'resendOtp' | 'verify' | 'getUser' | 'submitOnboardingStep',
     step: string,
     origin: string,
     error: unknown,
