@@ -1,4 +1,4 @@
-import type { AccessTokenPayload, StaffAccessTokenPayload } from '../utils/authToken';
+import type { AccessTokenPayload, AdminAccessTokenPayload, StaffAccessTokenPayload } from '../utils/authToken';
 
 declare global {
     namespace Express {
@@ -13,6 +13,7 @@ declare global {
 
         interface Request {
             auth?: AccessTokenPayload;
+            adminAuth?: AdminAccessTokenPayload;
             staffAuth?: StaffAccessTokenPayload;
             file?: Multer.File;
             uploadedFile?: UploadedS3File;

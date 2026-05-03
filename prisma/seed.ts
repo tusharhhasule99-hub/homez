@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import bcrypt from 'bcryptjs';
 import { prisma } from '../app/utils/prisma';
 
 const DURATION_TIERS = [
@@ -46,6 +47,25 @@ async function upsertDurationSlots(serviceId: string) {
 }
 
 async function main() {
+    const adminEmail = (process.env.ADMIN_SEED_EMAIL ?? 'homez@gmail.com').trim().toLowerCase();
+    const adminPassword = process.env.ADMIN_SEED_PASSWORD ?? 'homez123';
+    const passwordHash = bcrypt.hashSync(adminPassword, 10);
+
+    await prisma.admin.upsert({
+        where: { email: adminEmail },
+        create: {
+            email: adminEmail,
+            password_hash: passwordHash,
+            name: 'Default Admin',
+            is_active: true,
+        },
+        update: {
+            password_hash: passwordHash,
+            is_active: true,
+        },
+    });
+    console.log(`Seed: CMS admin ready (${adminEmail}). Set ADMIN_SEED_PASSWORD in .env to change password on next seed.`);
+
     const expiresAt = new Date();
     expiresAt.setMonth(expiresAt.getMonth() + 1);
 

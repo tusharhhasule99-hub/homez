@@ -1,14 +1,21 @@
 import express from 'express';
 import { authenticateJwt } from '../middleware/authenticateJwt';
+import { authenticateAdminJwt } from '../middleware/authenticateAdminJwt';
 import addressRoutes from './addresses/route';
 import authRoutes from './auth/route';
 import bookingRoutes from './bookings/route';
 import discountRoutes from './discounts/route';
 import serviceRoutes from './services/route';
 import staffRoutes from './staff/route';
+import adminAuthRoutes from './admin/auth/route';
+import adminUsersRoutes from './admin/users/route';
+import adminStaffRoutes from './admin/staff/route';
 
 const router = express.Router();
 
+router.use('/admin/auth', adminAuthRoutes);
+router.use('/admin/users', authenticateAdminJwt, adminUsersRoutes);
+router.use('/admin/staff', authenticateAdminJwt, adminStaffRoutes);
 router.use('/auth', authRoutes);
 router.use('/addresses', authenticateJwt, addressRoutes);
 router.use('/bookings', authenticateJwt, bookingRoutes);

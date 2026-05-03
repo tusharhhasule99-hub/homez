@@ -11,6 +11,12 @@ export type StaffAccessTokenPayload = {
     role: 'staff';
 };
 
+export type AdminAccessTokenPayload = {
+    sub: string;
+    email: string;
+    role: 'admin';
+};
+
 export class MissingJwtSecretError extends Error {
     readonly code = 'MISSING_JWT_SECRET';
     constructor() {
@@ -24,6 +30,14 @@ export class MissingStaffJwtSecretError extends Error {
     constructor() {
         super('STAFF_JWT_SECRET is not set (add to .env)');
         this.name = 'MissingStaffJwtSecretError';
+    }
+}
+
+export class MissingAdminJwtSecretError extends Error {
+    readonly code = 'MISSING_ADMIN_JWT_SECRET';
+    constructor() {
+        super('ADMIN_JWT_SECRET is not set (add to .env)');
+        this.name = 'MissingAdminJwtSecretError';
     }
 }
 
@@ -65,6 +79,38 @@ export function verifyAccessToken(token: string): AccessTokenPayload {
     return {
         sub: decoded.sub,
         phone_number: typeof decoded.phone_number === 'string' ? decoded.phone_number : '',
+    };
+}
+
+export function signAdminAccessToken(payload: Omit<AdminAccessTokenPayload, 'role'>): string {
+    const secret = process.env.ADMIN_JWT_SECRET;
+    if (!secret) {
+        throw new MissingAdminJwtSecretError();
+    }
+    const expiresIn = process.env.ADMIN_JWT_EXPIRES_IN ?? '7d';
+    return jwt.sign(
+        { sub: payload.sub, email: payload.email, role: 'admin' },
+        secret,
+        { expiresIn: expiresIn as jwt.SignOptions['expiresIn'] },
+    );
+}
+
+export function verifyAdminAccessToken(token: string): AdminAccessTokenPayload {
+    const secret = process.env.ADMIN_JWT_SECRET;
+    if (!secret) {
+        throw new MissingAdminJwtSecretError();
+    }
+    const decoded = jwt.verify(token, secret) as jwt.JwtPayload & { email?: string; role?: string };
+    if (typeof decoded.sub !== 'string') {
+        throw new jwt.JsonWebTokenError('Invalid token subject');
+    }
+    if (decoded.role !== 'admin') {
+        throw new jwt.JsonWebTokenError('Invalid admin token role');
+    }
+    return {
+        sub: decoded.sub,
+        email: typeof decoded.email === 'string' ? decoded.email : '',
+        role: 'admin',
     };
 }
 

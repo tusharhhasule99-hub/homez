@@ -7,6 +7,18 @@ datasource db {
   provider = "postgresql"
 }
 
+model Admin {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  password_hash String
+  name          String?
+  is_active     Boolean  @default(true)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  @@map("admins")
+}
+
 model Users {
   id           String @id @default(uuid())
   phone_number String
