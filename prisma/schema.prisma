@@ -39,6 +39,7 @@ model Users {
   addresses Address[]
   bookings  Booking[]
 
+
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
@@ -199,12 +200,43 @@ model Booking {
   rating_comment String?
   rated_at       DateTime?
 
+  payment Payment?
+
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
   @@index([user_id])
   @@index([status])
   @@map("bookings")
+}
+
+model Payment {
+  id         String @id @default(uuid())
+  booking_id String @unique
+  booking    Booking @relation(fields: [booking_id], references: [id], onDelete: Cascade)
+
+  provider PaymentProvider @default(RAZORPAY)
+
+  razorpay_order_id        String? @unique
+  razorpay_payment_id      String?
+  razorpay_payment_link_id String? @unique
+  payment_url              String?
+
+  amount   Decimal @db.Decimal(12, 2)
+  currency String  @default("INR")
+  status   PaymentStatus @default(CREATED)
+
+  method         String?
+  failure_reason String?
+  paid_at        DateTime?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([status])
+  @@index([razorpay_order_id])
+  @@index([razorpay_payment_link_id])
+  @@map("payments")
 }
 
 
@@ -229,4 +261,16 @@ enum StaffKycStatus {
   PENDING
   VERIFIED
   REJECTED
+}
+
+enum PaymentProvider {
+  RAZORPAY
+}
+
+enum PaymentStatus {
+  CREATED
+  PENDING
+  PAID
+  FAILED
+  EXPIRED
 }

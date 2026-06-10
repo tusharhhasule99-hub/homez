@@ -3,7 +3,7 @@
   "info": {
     "title": "HomeZ API",
     "version": "1.0.0",
-    "description": "HomeZ backend HTTP API.\n\n## Phone auth (OTP + JWT)\n\n**Login** — `POST /auth/login` with `phone_number` only: sends a **6-digit OTP** (10-minute expiry). If the phone is new, user is auto-created in unverified state. Response returns **only** `id` and `phone_number`.\n\n**Resend OTP** — `POST /auth/resend-otp` with `phone_number`: reissues OTP for an existing user.\n\n**Verify** — `POST /auth/verify` with `phone_number` and `otp`: message **Verified.** and a **JWT**. Payload includes `is_onboarding_completed`, `onboarding_step`, and full `user` for routing: if `is_onboarding_completed` is `false`, open onboarding; otherwise go to home.\n\n**Get User** — `GET /auth/user` with `Authorization: Bearer <JWT>`: returns current user profile and onboarding flags for app boot routing.\n\n**Onboarding** — `POST /auth/onboarding` with `Authorization: Bearer <JWT>`. **1** — `name`, `gender`. **2** — structured service location saved as the user’s first **`addresses`** row (`line1`, `area`, `city`, `pincode`, `latitude`, `longitude`, optional `label`; same rules as `POST /addresses`). If the user already has 3 saved addresses, step 2 only marks onboarding complete. Then `is_onboarding_completed` is `true`.\n\n**Discounts** — `GET /discounts` and `GET /discounts/code/{code}` require the same Bearer JWT.\n\n**Services** — `GET /services` and `GET /services/{id}` require `Authorization: Bearer <JWT>`. Query **`slot_type`**: `instant` (default), `scheduled`, or `all`. With `include_slots=true` on the list, `slots` is a filtered array; each slot includes its `slot_type`.\n\n**Addresses** — `GET/POST /addresses`, `GET/PATCH/DELETE /addresses/{id}` require JWT. **Max 3 saved addresses** per user; first address is default unless you set `is_default`.\n\n**Bookings** — `GET/POST /bookings`, `GET /bookings/{id}`, `POST /bookings/{id}/coupon`, `PATCH /bookings/{id}/status`, `POST /bookings/{id}/rating` require JWT. Create with `service_id`, `slot_id`, `address_id` (address must belong to the user; slot must belong to the service). **Status** on the booking may be `CREATED`, `ACCEPTED`, `REJECTED`, `ASSIGNING_STAFF`, `STAFF_EN_ROUTE`, `ARRIVED`, `COMPLETED`, or `CANCELLED`. **Users** may only use `PATCH /bookings/{id}/status` to **cancel** (`status: CANCELLED`) when the booking is not already terminal. Coupon apply only in `CREATED` and only once. Rating only when `COMPLETED` and not yet rated.\n\nIndian numbers: you may send `phone_number` with or without `+91`; `+91` is stripped before storage."
+    "description": "HomeZ backend HTTP API.\n\n## Phone auth (OTP + JWT)\n\n**Login** — `POST /auth/login` with `phone_number` only: sends a **6-digit OTP** (10-minute expiry). If the phone is new, user is auto-created in unverified state. Response returns **only** `id` and `phone_number`.\n\n**Resend OTP** — `POST /auth/resend-otp` with `phone_number`: reissues OTP for an existing user.\n\n**Verify** — `POST /auth/verify` with `phone_number` and `otp`: message **Verified.** and a **JWT**. Payload includes `is_onboarding_completed`, `onboarding_step`, and full `user` for routing: if `is_onboarding_completed` is `false`, open onboarding; otherwise go to home.\n\n**Get User** — `GET /auth/user` with `Authorization: Bearer <JWT>`: returns current user profile and onboarding flags for app boot routing.\n\n**Onboarding** — `POST /auth/onboarding` with `Authorization: Bearer <JWT>`. **1** — `name`, `gender`. **2** — structured service location saved as the user’s first **`addresses`** row (`line1`, `area`, `city`, `pincode`, `latitude`, `longitude`, optional `label`; same rules as `POST /addresses`). If the user already has 3 saved addresses, step 2 only marks onboarding complete. Then `is_onboarding_completed` is `true`.\n\n**Discounts** — `GET /discounts` and `GET /discounts/code/{code}` require the same Bearer JWT.\n\n**Services** — `GET /services` and `GET /services/{id}` require `Authorization: Bearer <JWT>`. Query **`slot_type`**: `instant` (default), `scheduled`, or `all`. With `include_slots=true` on the list, `slots` is a filtered array; each slot includes its `slot_type`.\n\n**Addresses** — `GET/POST /addresses`, `GET/PATCH/DELETE /addresses/{id}` require JWT. **Max 3 saved addresses** per user; first address is default unless you set `is_default`.\n\n**Bookings** — `GET/POST /bookings`, `GET /bookings/{id}`, `POST /bookings/{id}/coupon`, `PATCH /bookings/{id}/status`, `POST /bookings/{id}/rating` require JWT. Create with `service_id`, `slot_id`, `address_id` (address must belong to the user; slot must belong to the service). **Status** on the booking may be `CREATED`, `ACCEPTED`, `REJECTED`, `ASSIGNING_STAFF`, `STAFF_EN_ROUTE`, `ARRIVED`, `COMPLETED`, or `CANCELLED`. **Users** may only use `PATCH /bookings/{id}/status` to **cancel** (`status: CANCELLED`) when the booking is not already terminal. Coupon apply only in `CREATED` and only once. Rating only when `COMPLETED` and not yet rated.\n\n**Payments (Razorpay)** — `POST /payments/bookings/{bookingId}` creates a Razorpay order and payment link from `booking.total_amount` (rupees). Returns `payment_url` (hosted short link) and `checkout` (SDK fields: `key`, `order_id`, `amount` in paise). `GET /payments/bookings/{bookingId}/status` polls payment status and syncs with Razorpay until `PAID`, `FAILED`, or `EXPIRED`. On success, booking `payment_method` is set (`UPI`, `CARD`, or `WALLET`). Typical flow: create booking → create payment → open `payment_url` or Razorpay Checkout → poll status.\n\n**Webhooks** — `POST /webhooks/razorpay` is called by Razorpay (no JWT). Requires header `x-razorpay-signature`. Handles `payment.captured`, `payment.failed`, and `payment_link.paid`. Configure in Razorpay Dashboard → Webhooks.\n\nIndian numbers: you may send `phone_number` with or without `+91`; `+91` is stripped before storage."
   },
   "servers": [
     {
@@ -36,6 +36,14 @@
     {
       "name": "Bookings",
       "description": "Service bookings, coupons, lifecycle status, and ratings (Bearer JWT)"
+    },
+    {
+      "name": "Payments",
+      "description": "Razorpay payment creation and status polling for bookings (Bearer JWT)"
+    },
+    {
+      "name": "Webhooks",
+      "description": "Razorpay server-to-server event callbacks (signature verified, no JWT)"
     },
     {
       "name": "Staff",
@@ -1562,6 +1570,218 @@
           }
         }
       }
+    },
+    "/payments/bookings/{bookingId}": {
+      "post": {
+        "tags": ["Payments"],
+        "summary": "Create Razorpay payment for a booking",
+        "description": "Creates a Razorpay order and payment link from `booking.total_amount` (rupees). Returns `payment_url` for browser/WebView and `checkout` for the Razorpay SDK. Idempotent while payment is `CREATED` or `PENDING` — returns the existing open payment. Fails with `409` if already `PAID`.",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "bookingId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Payment created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SuccessPaymentOne" }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid booking state",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Booking not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "409": {
+            "description": "Booking already paid",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "500": {
+            "description": "Server or Razorpay error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payments/bookings/{bookingId}/status": {
+      "get": {
+        "tags": ["Payments"],
+        "summary": "Poll payment status for a booking",
+        "description": "Returns the payment record for the booking. While status is `CREATED` or `PENDING`, syncs with Razorpay before responding. Poll every 2–3 seconds after the customer completes checkout until `PAID`, `FAILED`, or `EXPIRED`.",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "bookingId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SuccessPaymentOne" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Booking or payment not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks/razorpay": {
+      "post": {
+        "tags": ["Webhooks"],
+        "summary": "Razorpay payment webhook",
+        "description": "Called by Razorpay when payment events occur. Verifies `x-razorpay-signature` against the raw request body using `RAZORPAY_WEBHOOK_SECRET` (falls back to `RAZORPAY_SECRET`). Handles `payment.captured`, `payment.failed`, and `payment_link.paid`. Register this URL in Razorpay Dashboard → Webhooks.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "x-razorpay-signature",
+            "in": "header",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "HMAC SHA256 signature from Razorpay"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RazorpayWebhookBody" },
+              "examples": {
+                "payment_captured": {
+                  "summary": "payment.captured",
+                  "value": {
+                    "event": "payment.captured",
+                    "payload": {
+                      "payment": {
+                        "entity": {
+                          "id": "pay_xxxxxxxx",
+                          "order_id": "order_xxxxxxxx",
+                          "status": "captured",
+                          "method": "upi",
+                          "amount": 11800,
+                          "currency": "INR"
+                        }
+                      }
+                    }
+                  }
+                },
+                "payment_link_paid": {
+                  "summary": "payment_link.paid",
+                  "value": {
+                    "event": "payment_link.paid",
+                    "payload": {
+                      "payment_link": {
+                        "entity": {
+                          "id": "plink_xxxxxxxx",
+                          "status": "paid",
+                          "notes": {
+                            "booking_id": "uuid",
+                            "payment_id": "uuid",
+                            "user_id": "uuid"
+                          }
+                        }
+                      },
+                      "payment": {
+                        "entity": {
+                          "id": "pay_xxxxxxxx",
+                          "method": "card"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook processed",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SuccessWebhookAck" }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid signature or payload",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "500": {
+            "description": "Processing failed",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2141,6 +2361,83 @@
           "success": { "type": "boolean", "example": true },
           "message": { "type": "string" },
           "data": { "$ref": "#/components/schemas/PublicBooking" }
+        }
+      },
+      "PaymentStatus": {
+        "type": "string",
+        "enum": ["CREATED", "PENDING", "PAID", "FAILED", "EXPIRED"]
+      },
+      "RazorpayCheckout": {
+        "type": "object",
+        "nullable": true,
+        "description": "Fields for Razorpay Checkout SDK. `amount` is in paise (INR subunits).",
+        "properties": {
+          "key": { "type": "string", "description": "Razorpay publishable key (RAZORPAY_KEY)" },
+          "order_id": { "type": "string", "description": "Razorpay order id" },
+          "amount": { "type": "integer", "description": "Amount in paise", "example": 11800 },
+          "currency": { "type": "string", "example": "INR" },
+          "name": { "type": "string", "example": "HomeZ" },
+          "description": { "type": "string", "example": "Booking uuid" }
+        }
+      },
+      "PublicPayment": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "booking_id": { "type": "string", "format": "uuid" },
+          "status": { "$ref": "#/components/schemas/PaymentStatus" },
+          "amount": {
+            "type": "number",
+            "format": "double",
+            "description": "Amount in rupees (same as booking.total_amount)"
+          },
+          "currency": { "type": "string", "example": "INR" },
+          "payment_url": {
+            "type": "string",
+            "nullable": true,
+            "description": "Razorpay hosted payment short link"
+          },
+          "razorpay_order_id": { "type": "string", "nullable": true },
+          "razorpay_payment_id": { "type": "string", "nullable": true },
+          "razorpay_payment_link_id": { "type": "string", "nullable": true },
+          "method": {
+            "type": "string",
+            "nullable": true,
+            "description": "When paid: UPI, CARD, or WALLET"
+          },
+          "paid_at": { "type": "string", "format": "date-time", "nullable": true },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" },
+          "checkout": { "$ref": "#/components/schemas/RazorpayCheckout" }
+        }
+      },
+      "SuccessPaymentOne": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "message": { "type": "string" },
+          "data": { "$ref": "#/components/schemas/PublicPayment" }
+        }
+      },
+      "RazorpayWebhookBody": {
+        "type": "object",
+        "required": ["event", "payload"],
+        "properties": {
+          "event": {
+            "type": "string",
+            "description": "Razorpay event name",
+            "enum": ["payment.captured", "payment.failed", "payment_link.paid"]
+          },
+          "payload": {
+            "type": "object",
+            "description": "Event-specific payload from Razorpay"
+          }
+        }
+      },
+      "SuccessWebhookAck": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true }
         }
       },
       "Error": {

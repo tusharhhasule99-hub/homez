@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../app/utils/prisma';
+import { seedStaff } from './seeds/staff';
 
 const DURATION_TIERS = [
     { label: '60 min', minutes: 60, price: 99, slash: 182 },
@@ -232,6 +233,8 @@ async function main() {
         });
         await upsertDurationSlots(row.id);
     }
+
+    await seedStaff();
 
     console.log('Seed: discounts + services/slots (Snabbit-style tiers: instant + scheduled).');
 }

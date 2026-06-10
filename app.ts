@@ -8,12 +8,15 @@ import swaggerUi from 'swagger-ui-express';
 import openapiDocument from './app/swagger/openapi.json';
 
 import routes from './app/routes/routes';
+import razorpayWebhookRoutes from './app/routes/webhooks/razorpay';
 import { requestLogger } from './app/middleware/requestLogger';
+import { startBookingFlowCron } from './app/jobs/bookingFlowCron';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
+app.use('/api/webhooks/razorpay', express.raw({ type: 'application/json' }), razorpayWebhookRoutes);
 app.use(express.json());
 app.use(requestLogger(PORT));
 app.use(
@@ -45,4 +48,5 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 
 app.listen(PORT, () => {
     console.log(`Server is running on at http://localhost:${PORT}`);
+    startBookingFlowCron();
 });
