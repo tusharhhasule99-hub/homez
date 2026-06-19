@@ -91,9 +91,9 @@ export async function createRazorpayPaymentLink(opts: {
         notify: { sms: false, email: false },
         reminder_enable: false,
         callback_method: 'get',
+        callback_url: opts.callbackUrl || undefined,
     };
-    if (opts.callbackUrl) payload.callback_url = opts.callbackUrl;
-
+    
     const link = (await razorpay.paymentLink.create(
         payload as unknown as Parameters<Razorpay['paymentLink']['create']>[0],
     )) as unknown as RazorpayPaymentLinkResponse;
