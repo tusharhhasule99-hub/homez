@@ -231,7 +231,7 @@ class paymentService {
                 notes,
             });
 
-            const callbackUrl = `homzy://payments/callback`;
+            const callbackUrl = `https://api.homzy.online/api/payments/callback`;
 
             const paymentLink = await createRazorpayPaymentLink({
                 amountPaise,
