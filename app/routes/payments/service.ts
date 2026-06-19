@@ -231,11 +231,14 @@ class paymentService {
                 notes,
             });
 
+            const callbackUrl = `homzy://payments/callback`;
+
             const paymentLink = await createRazorpayPaymentLink({
                 amountPaise,
                 referenceId: bookingId,
                 description: `HomeZ booking payment`,
                 notes,
+                callbackUrl,
             });
 
             const row = await prisma.payment.upsert({
