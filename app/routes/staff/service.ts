@@ -4,6 +4,7 @@ import { normalizePhoneForStorage } from '../../utils/phone';
 import { prisma } from '../../utils/prisma';
 import { signStaffAccessToken, MissingStaffJwtSecretError } from '../../utils/authToken';
 import { publicStaffSelect, type PublicStaff } from './staffPublic';
+import { expireStaffOffers } from './jobs/dispatchService';
 
 const DEV_STATIC_OTP = '123456';
 
@@ -30,6 +31,84 @@ async function persistOtpAndSend(staffId: string, normalizedPhone: string): Prom
 }
 
 class staffService {
+    /** Location ping from the staff app. Updates coords + freshness timestamp. */
+    updateLocation = async (staffId: string, body: Record<string, unknown>) => {
+        try {
+            const lat = Number(body.latitude);
+            const lng = Number(body.longitude);
+            if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+                return { success: false as const, message: 'latitude must be between -90 and 90.', code: 'VALIDATION' as const };
+            }
+            if (!Number.isFinite(lng) || lng < -180 || lng > 180) {
+                return { success: false as const, message: 'longitude must be between -180 and 180.', code: 'VALIDATION' as const };
+            }
+
+            const existing = await prisma.staff.findUnique({
+                where: { id: staffId },
+                select: { id: true, is_active: true, is_deleted: true },
+            });
+            if (!existing || !existing.is_active || existing.is_deleted) {
+                return { success: false as const, message: 'Staff not found.', code: 'STAFF_NOT_FOUND' as const };
+            }
+
+            const updated: PublicStaff = await prisma.staff.update({
+                where: { id: staffId },
+                data: { latitude: lat, longitude: lng, last_seen_at: new Date() },
+                select: publicStaffSelect,
+            });
+
+            return { success: true as const, message: 'Location updated.', data: updated };
+        } catch (error) {
+            console.error('Error in staff updateLocation', error);
+            return {
+                success: false as const,
+                message: 'Internal server error. Please try again later.',
+                code: 'INTERNAL_SERVER_ERROR' as const,
+            };
+        }
+    };
+
+    /** Online/offline toggle. Going offline expires the staff's pending offers. */
+    setAvailability = async (staffId: string, body: Record<string, unknown>) => {
+        try {
+            if (typeof body.is_available !== 'boolean') {
+                return { success: false as const, message: 'is_available must be a boolean.', code: 'VALIDATION' as const };
+            }
+            const isAvailable = body.is_available;
+
+            const existing = await prisma.staff.findUnique({
+                where: { id: staffId },
+                select: { id: true, is_active: true, is_deleted: true },
+            });
+            if (!existing || !existing.is_active || existing.is_deleted) {
+                return { success: false as const, message: 'Staff not found.', code: 'STAFF_NOT_FOUND' as const };
+            }
+
+            const updated: PublicStaff = await prisma.staff.update({
+                where: { id: staffId },
+                data: {
+                    is_available: isAvailable,
+                    // Refresh freshness when coming online so dispatch sees them.
+                    ...(isAvailable ? { last_seen_at: new Date() } : {}),
+                },
+                select: publicStaffSelect,
+            });
+
+            if (!isAvailable) {
+                await expireStaffOffers(staffId);
+            }
+
+            return { success: true as const, message: 'Availability updated.', data: updated };
+        } catch (error) {
+            console.error('Error in staff setAvailability', error);
+            return {
+                success: false as const,
+                message: 'Internal server error. Please try again later.',
+                code: 'INTERNAL_SERVER_ERROR' as const,
+            };
+        }
+    };
+
     uploadAsset = async (
         staffId: string,
         useCase: 'profile' | 'media',

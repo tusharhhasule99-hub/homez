@@ -16,7 +16,8 @@ const ALL_STATUSES: BookingStatus[] = [
 const TERMINAL: BookingStatus[] = [BookingStatus.REJECTED, BookingStatus.COMPLETED, BookingStatus.CANCELLED];
 
 const ALLOWED_NEXT: Record<BookingStatus, BookingStatus[]> = {
-    [BookingStatus.CREATED]: [BookingStatus.ACCEPTED, BookingStatus.REJECTED, BookingStatus.CANCELLED],
+    [BookingStatus.CREATED]: [BookingStatus.AWAITING_STAFF, BookingStatus.ACCEPTED, BookingStatus.REJECTED, BookingStatus.CANCELLED],
+    [BookingStatus.AWAITING_STAFF]: [BookingStatus.ACCEPTED, BookingStatus.REJECTED, BookingStatus.CANCELLED],
     [BookingStatus.ACCEPTED]: [BookingStatus.ASSIGNING_STAFF, BookingStatus.REJECTED, BookingStatus.CANCELLED],
     [BookingStatus.ASSIGNING_STAFF]: [BookingStatus.STAFF_EN_ROUTE, BookingStatus.CANCELLED],
     [BookingStatus.STAFF_EN_ROUTE]: [BookingStatus.ARRIVED, BookingStatus.CANCELLED],

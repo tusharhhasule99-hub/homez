@@ -99,6 +99,50 @@ class staffController {
         }
     };
 
+    updateLocation = async (req: express.Request, res: express.Response) => {
+        try {
+            const staffId = req.staffAuth?.sub;
+            if (!staffId) {
+                return sendError(res, 401, 'Unauthorized', 'UNAUTHORIZED');
+            }
+
+            const result = await this.staffService.updateLocation(staffId, req.body ?? {});
+            if (!result.success) {
+                let status = 400;
+                if (result.code === 'STAFF_NOT_FOUND') status = 404;
+                else if (result.code === 'INTERNAL_SERVER_ERROR') status = 500;
+                return sendError(res, status, result.message, result.code);
+            }
+
+            return sendSuccess(res, 200, result.message, result.data);
+        } catch (error) {
+            console.error('Error in staff updateLocation :: Internal server error', error);
+            return sendError(res, 500, 'Internal server error', 'INTERNAL_SERVER_ERROR');
+        }
+    };
+
+    setAvailability = async (req: express.Request, res: express.Response) => {
+        try {
+            const staffId = req.staffAuth?.sub;
+            if (!staffId) {
+                return sendError(res, 401, 'Unauthorized', 'UNAUTHORIZED');
+            }
+
+            const result = await this.staffService.setAvailability(staffId, req.body ?? {});
+            if (!result.success) {
+                let status = 400;
+                if (result.code === 'STAFF_NOT_FOUND') status = 404;
+                else if (result.code === 'INTERNAL_SERVER_ERROR') status = 500;
+                return sendError(res, status, result.message, result.code);
+            }
+
+            return sendSuccess(res, 200, result.message, result.data);
+        } catch (error) {
+            console.error('Error in staff setAvailability :: Internal server error', error);
+            return sendError(res, 500, 'Internal server error', 'INTERNAL_SERVER_ERROR');
+        }
+    };
+
     upload = async (req: express.Request, res: express.Response) => {
         try {
             const staffId = req.staffAuth?.sub;

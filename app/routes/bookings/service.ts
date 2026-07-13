@@ -1,5 +1,6 @@
 import { prisma } from '../../utils/prisma';
 import { loadApplicableDiscountRow } from '../discounts/service';
+import { expireBookingOffers } from '../staff/jobs/dispatchService';
 import type { Booking, Service, Slot, Address } from '../../generated/prisma/client';
 import { BookingStatus } from '../../generated/prisma/enums';
 import type { Prisma } from '../../generated/prisma/client';
@@ -35,7 +36,8 @@ function computeDiscountAmount(
 const TERMINAL: BookingStatus[] = [BookingStatus.REJECTED, BookingStatus.COMPLETED, BookingStatus.CANCELLED];
 
 const ALLOWED_NEXT: Record<BookingStatus, BookingStatus[]> = {
-    [BookingStatus.CREATED]: [BookingStatus.ACCEPTED, BookingStatus.REJECTED, BookingStatus.CANCELLED],
+    [BookingStatus.CREATED]: [BookingStatus.AWAITING_STAFF, BookingStatus.ACCEPTED, BookingStatus.REJECTED, BookingStatus.CANCELLED],
+    [BookingStatus.AWAITING_STAFF]: [BookingStatus.ACCEPTED, BookingStatus.REJECTED, BookingStatus.CANCELLED],
     [BookingStatus.ACCEPTED]: [BookingStatus.ASSIGNING_STAFF, BookingStatus.REJECTED, BookingStatus.CANCELLED],
     [BookingStatus.ASSIGNING_STAFF]: [BookingStatus.STAFF_EN_ROUTE, BookingStatus.CANCELLED],
     [BookingStatus.STAFF_EN_ROUTE]: [BookingStatus.ARRIVED, BookingStatus.CANCELLED],
@@ -368,6 +370,11 @@ class bookingService {
                     status: toStatus,
                 },
             });
+
+            // Cancelling while still searching: retract any outstanding offers.
+            await expireBookingOffers(bookingId).catch((e) =>
+                console.error('[bookings] cancel expireBookingOffers', e),
+            );
 
             const updated = await prisma.booking.findFirstOrThrow({
                 where: { id: bookingId },

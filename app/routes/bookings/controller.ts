@@ -1,6 +1,7 @@
 import express from 'express';
 import { sendError, sendSuccess } from '../../utils/sendResponse';
 import bookingService from './service';
+import { dispatchBooking } from '../staff/jobs/dispatchService';
 
 function uid(req: express.Request): string | undefined {
     return req.auth?.sub;
@@ -53,6 +54,11 @@ class bookingController {
                 result.code === 'NOT_FOUND' ? 404 : result.code === 'VALIDATION' ? 400 : 500;
             return sendError(res, status, result.message, result.code);
         }
+        // Fire-and-forget: start dispatching to nearby staff. Kept out of the
+        // create transaction so booking latency is unaffected; the sweep
+        // self-heals if this trigger fails.
+        void dispatchBooking(result.data.id).catch((e) => console.error('[dispatch] trigger', e));
+
         return sendSuccess(res, 201, 'Booking created.', result.data);
     };
 

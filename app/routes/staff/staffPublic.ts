@@ -10,6 +10,10 @@ export const publicStaffSelect = {
     kyc_status: true,
     profile_photo_url: true,
     docs: true,
+    latitude: true,
+    longitude: true,
+    is_available: true,
+    last_seen_at: true,
     created_at: true,
     updated_at: true,
 } as const;
@@ -26,6 +30,10 @@ export type PublicStaff = {
     kyc_status: 'PENDING' | 'VERIFIED' | 'REJECTED';
     profile_photo_url: string | null;
     docs: unknown;
+    latitude: number | null;
+    longitude: number | null;
+    is_available: boolean;
+    last_seen_at: Date | null;
     created_at: Date;
     updated_at: Date;
 };

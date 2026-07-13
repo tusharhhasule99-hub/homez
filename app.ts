@@ -11,6 +11,7 @@ import routes from './app/routes/routes';
 import razorpayWebhookRoutes from './app/routes/webhooks/razorpay';
 import { requestLogger } from './app/middleware/requestLogger';
 import { startBookingFlowCron } from './app/jobs/bookingFlowCron';
+import { startDispatchSweep } from './app/jobs/dispatchSweepCron';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -48,5 +49,11 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 
 app.listen(PORT, () => {
     console.log(`Server is running on at http://localhost:${PORT}`);
-    startBookingFlowCron();
+    startDispatchSweep();
+
+    // Legacy simulated booking flow — kept for demos only. Must NOT run alongside
+    // real dispatch (it fakes staff assignment and would race the atomic claim).
+    if (process.env.ENABLE_FAKE_FLOW === 'true') {
+        startBookingFlowCron();
+    }
 });

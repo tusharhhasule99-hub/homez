@@ -66,9 +66,18 @@ model Staff {
   otp_hash       String?
   otp_expires_at DateTime?
 
+  latitude     Float?
+  longitude    Float?
+  is_available Boolean   @default(false)
+  last_seen_at DateTime?
+
+  job_offers        JobOffer[]
+  assigned_bookings Booking[]  @relation("BookingAssignedStaff")
+
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
+  @@index([is_available])
   @@map("staff")
 }
 
@@ -194,6 +203,15 @@ model Booking {
   payment_method String?
   staff_name     String?
 
+  staff_id String?
+  staff    Staff?  @relation("BookingAssignedStaff", fields: [staff_id], references: [id], onDelete: SetNull)
+
+  dispatch_started_at DateTime?
+  current_radius_km   Int?
+  last_offer_batch_at DateTime?
+
+  job_offers JobOffer[]
+
   scheduled_at DateTime?
 
   rating         Int?
@@ -207,7 +225,28 @@ model Booking {
 
   @@index([user_id])
   @@index([status])
+  @@index([staff_id])
   @@map("bookings")
+}
+
+model JobOffer {
+  id           String         @id @default(uuid())
+  booking_id   String
+  booking      Booking        @relation(fields: [booking_id], references: [id], onDelete: Cascade)
+  staff_id     String
+  staff        Staff          @relation(fields: [staff_id], references: [id], onDelete: Cascade)
+  status       JobOfferStatus @default(PENDING)
+  radius_km    Int
+  offered_at   DateTime       @default(now())
+  responded_at DateTime?
+  expires_at   DateTime
+  created_at   DateTime       @default(now())
+  updated_at   DateTime       @updatedAt
+
+  @@unique([booking_id, staff_id])
+  @@index([staff_id, status])
+  @@index([booking_id, status])
+  @@map("job_offers")
 }
 
 model Payment {
@@ -248,6 +287,7 @@ enum SlotType {
 /// Lifecycle: CREATED → ACCEPTED | REJECTED | CANCELLED → … → COMPLETED
 enum BookingStatus {
   CREATED
+  AWAITING_STAFF
   ACCEPTED
   REJECTED
   ASSIGNING_STAFF
@@ -255,6 +295,13 @@ enum BookingStatus {
   ARRIVED
   COMPLETED
   CANCELLED
+}
+
+enum JobOfferStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  DECLINED
 }
 
 enum StaffKycStatus {
