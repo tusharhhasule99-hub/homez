@@ -10,12 +10,12 @@ class staffController {
 
     login = async (req: express.Request, res: express.Response) => {
         try {
-            const { phone_number } = req.body;
-            if (!phone_number) {
-                return sendError(res, 400, 'Phone number is required');
+            const body = req.body;
+            if (!body || typeof body !== 'object') {
+                return sendError(res, 400, 'JSON body required', 'VALIDATION');
             }
 
-            const result = await this.staffService.login(phone_number);
+            const result = await this.staffService.login(body as Record<string, unknown>);
             if (!result.success) {
                 let status = 400;
                 if (result.code === 'STAFF_NOT_FOUND') status = 404;
@@ -27,28 +27,6 @@ class staffController {
             return sendSuccess(res, 200, result.message, result.data);
         } catch (error) {
             console.error('Error in staff login :: Internal server error', error);
-            return sendError(res, 500, 'Internal server error', 'INTERNAL_SERVER_ERROR');
-        }
-    };
-
-    register = async (req: express.Request, res: express.Response) => {
-        try {
-            const body = req.body;
-            if (!body || typeof body !== 'object') {
-                return sendError(res, 400, 'JSON body required', 'VALIDATION');
-            }
-
-            const result = await this.staffService.register(body as Record<string, unknown>);
-            if (!result.success) {
-                let status = 400;
-                if (result.code === 'INTERNAL_SERVER_ERROR') status = 500;
-                else if (result.code === 'SERVER_CONFIG') status = 503;
-                return sendError(res, status, result.message, result.code);
-            }
-
-            return sendSuccess(res, 200, result.message, result.data);
-        } catch (error) {
-            console.error('Error in staff register :: Internal server error', error);
             return sendError(res, 500, 'Internal server error', 'INTERNAL_SERVER_ERROR');
         }
     };

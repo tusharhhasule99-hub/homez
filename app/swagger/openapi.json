@@ -440,106 +440,47 @@
         }
       }
     },
-    "/staff/register": {
-      "post": {
-        "tags": [
-          "Staff"
-        ],
-        "summary": "Register or update staff profile and send OTP",
-        "description": "Creates staff for a new phone number or updates existing staff profile, then sends OTP for phone verification.",
-        "security": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/StaffRegisterBody"
-              },
-              "example": {
-                "name": "Ravi Kumar",
-                "phone_number": "+919876543210",
-                "gender": "male",
-                "role_title": "Electrician",
-                "profile_photo_url": "https://cdn.example.com/staff/ravi.jpg",
-                "docs": [
-                  {
-                    "type": "aadhaar",
-                    "url": "https://cdn.example.com/docs/aadhaar.jpg"
-                  },
-                  {
-                    "type": "pan",
-                    "url": "https://cdn.example.com/docs/pan.jpg"
-                  }
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Registered and OTP sent",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SuccessStaffRegister"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Server error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Server misconfiguration",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/staff/login": {
       "post": {
         "tags": [
           "Staff"
         ],
-        "summary": "Staff login with phone number",
-        "description": "Sends OTP for an existing staff account. Use verify-otp to receive token.",
+        "summary": "Staff login or register with phone (combined)",
+        "description": "Combined register + login. Existing staff: send `phone_number` only to receive OTP. New staff: also send `name` (required) plus optional profile fields to create the account, then receive OTP. Optional profile fields on an existing account update the profile before OTP is sent. Use `/staff/verify-otp` to get a token.",
         "security": [],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PhoneBody"
+                "$ref": "#/components/schemas/StaffLoginBody"
               },
               "examples": {
-                "with_plus91": {
-                  "$ref": "#/components/examples/phoneWithPlus91"
+                "existing_login": {
+                  "summary": "Existing staff — phone only",
+                  "value": {
+                    "phone_number": "+919876543210"
+                  }
                 },
-                "national_number": {
-                  "$ref": "#/components/examples/phoneNational"
+                "new_registration": {
+                  "summary": "New staff — register + OTP",
+                  "value": {
+                    "name": "Ravi Kumar",
+                    "phone_number": "+919876543210",
+                    "gender": "male",
+                    "role_title": "Electrician",
+                    "profile_photo_url": "https://cdn.example.com/staff/ravi.jpg",
+                    "docs": [
+                      {
+                        "type": "aadhaar",
+                        "url": "https://cdn.example.com/docs/aadhaar.jpg"
+                      },
+                      {
+                        "type": "pan",
+                        "url": "https://cdn.example.com/docs/pan.jpg"
+                      }
+                    ]
+                  }
                 }
               }
             }
@@ -547,7 +488,7 @@
         },
         "responses": {
           "200": {
-            "description": "OTP sent",
+            "description": "OTP sent (account created if new)",
             "content": {
               "application/json": {
                 "schema": {
@@ -557,7 +498,7 @@
             }
           },
           "400": {
-            "description": "Validation error",
+            "description": "Validation error (e.g. missing name for new staff)",
             "content": {
               "application/json": {
                 "schema": {
@@ -567,7 +508,7 @@
             }
           },
           "404": {
-            "description": "Staff not found",
+            "description": "Staff inactive or deleted",
             "content": {
               "application/json": {
                 "schema": {
@@ -3009,20 +2950,20 @@
           }
         }
       },
-      "StaffRegisterBody": {
+      "StaffLoginBody": {
         "type": "object",
         "required": [
-          "name",
           "phone_number"
         ],
         "properties": {
-          "name": {
-            "type": "string",
-            "example": "Ravi Kumar"
-          },
           "phone_number": {
             "type": "string",
             "description": "Indian mobile: with or without +91; +91 is stripped before storage."
+          },
+          "name": {
+            "type": "string",
+            "description": "Required when registering a new staff phone number.",
+            "example": "Ravi Kumar"
           },
           "gender": {
             "type": "string",

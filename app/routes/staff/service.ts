@@ -187,19 +187,90 @@ class staffService {
         }
     };
 
-    login = async (phone_number: string) => {
+    /**
+     * Combined register + login.
+     * - Existing staff: phone_number only → send OTP.
+     * - New staff: phone_number + name (optional profile fields) → create, then send OTP.
+     * - Existing staff with profile fields: updates profile, then sends OTP.
+     */
+    login = async (body: Record<string, unknown>) => {
         try {
-            const normalized = normalizePhoneForStorage(phone_number);
-            if (!normalized) {
-                return { success: false as const, message: 'Phone number is required.', code: 'VALIDATION' as const };
+            const phoneRaw = body.phone_number;
+            if (typeof phoneRaw !== 'string' || !phoneRaw.trim()) {
+                return { success: false as const, message: 'phone_number is required.', code: 'VALIDATION' as const };
             }
 
-            const staff = await prisma.staff.findUnique({ where: { phone_number: normalized } });
-            if (!staff || !staff.is_active || staff.is_deleted) {
-                return { success: false as const, message: 'Staff not found.', code: 'STAFF_NOT_FOUND' as const };
+            const phone_number = normalizePhoneForStorage(phoneRaw);
+            if (!phone_number) {
+                return { success: false as const, message: 'phone_number is required.', code: 'VALIDATION' as const };
             }
 
-            await persistOtpAndSend(staff.id, normalized);
+            const nameRaw = body.name;
+            const genderRaw = body.gender;
+            const roleTitleRaw = body.role_title;
+            const photoUrlRaw = body.profile_photo_url;
+            const docsRaw = body.docs;
+
+            const hasName = typeof nameRaw === 'string' && !!nameRaw.trim();
+            const hasGender = typeof genderRaw === 'string' && !!genderRaw.trim();
+            const hasRoleTitle = typeof roleTitleRaw === 'string' && !!roleTitleRaw.trim();
+            const hasPhoto = typeof photoUrlRaw === 'string' && !!photoUrlRaw.trim();
+            const hasDocs = Array.isArray(docsRaw);
+            const hasProfileUpdate = hasName || hasGender || hasRoleTitle || hasPhoto || hasDocs;
+
+            let staff = await prisma.staff.findUnique({ where: { phone_number } });
+
+            if (!staff) {
+                if (!hasName) {
+                    return {
+                        success: false as const,
+                        message: 'name is required for new staff registration.',
+                        code: 'VALIDATION' as const,
+                    };
+                }
+
+                staff = await prisma.staff.create({
+                    data: {
+                        phone_number,
+                        name: (nameRaw as string).trim(),
+                        gender: hasGender ? (genderRaw as string).trim().toLowerCase() : null,
+                        role_title: hasRoleTitle ? (roleTitleRaw as string).trim() : null,
+                        profile_photo_url: hasPhoto ? (photoUrlRaw as string).trim() : null,
+                        docs: hasDocs ? docsRaw : [],
+                        is_phone_verified: false,
+                        is_photo_verified: false,
+                        is_docs_verified: false,
+                        kyc_status: 'PENDING',
+                    },
+                });
+            } else {
+                if (!staff.is_active || staff.is_deleted) {
+                    return { success: false as const, message: 'Staff not found.', code: 'STAFF_NOT_FOUND' as const };
+                }
+
+                if (hasProfileUpdate) {
+                    staff = await prisma.staff.update({
+                        where: { id: staff.id },
+                        data: {
+                            ...(hasName ? { name: (nameRaw as string).trim() } : {}),
+                            ...(hasGender ? { gender: (genderRaw as string).trim().toLowerCase() } : {}),
+                            ...(hasRoleTitle ? { role_title: (roleTitleRaw as string).trim() } : {}),
+                            ...(hasPhoto ? { profile_photo_url: (photoUrlRaw as string).trim() } : {}),
+                            ...(hasDocs ? { docs: docsRaw } : {}),
+                            // Profile changes reset verification pending admin review.
+                            ...(hasPhoto || hasDocs
+                                ? {
+                                      is_photo_verified: hasPhoto ? false : undefined,
+                                      is_docs_verified: hasDocs ? false : undefined,
+                                      kyc_status: 'PENDING' as const,
+                                  }
+                                : {}),
+                        },
+                    });
+                }
+            }
+
+            await persistOtpAndSend(staff.id, phone_number);
 
             const slim: PublicStaff = await prisma.staff.findUniqueOrThrow({
                 where: { id: staff.id },
@@ -220,93 +291,6 @@ class staffService {
                 };
             }
             console.error('Error in staff login', error);
-            return {
-                success: false as const,
-                message: 'Internal server error. Please try again later.',
-                code: 'INTERNAL_SERVER_ERROR' as const,
-            };
-        }
-    };
-
-    register = async (body: Record<string, unknown>) => {
-        try {
-            const phoneRaw = body.phone_number;
-            const nameRaw = body.name;
-            const genderRaw = body.gender;
-            const roleTitleRaw = body.role_title;
-            const photoUrlRaw = body.profile_photo_url;
-            const docsRaw = body.docs;
-
-            if (typeof phoneRaw !== 'string' || !phoneRaw.trim()) {
-                return { success: false as const, message: 'phone_number is required.', code: 'VALIDATION' as const };
-            }
-            if (typeof nameRaw !== 'string' || !nameRaw.trim()) {
-                return { success: false as const, message: 'name is required.', code: 'VALIDATION' as const };
-            }
-
-            const phone_number = normalizePhoneForStorage(phoneRaw);
-            const name = nameRaw.trim();
-            const gender = typeof genderRaw === 'string' && genderRaw.trim() ? genderRaw.trim().toLowerCase() : null;
-            const role_title = typeof roleTitleRaw === 'string' && roleTitleRaw.trim() ? roleTitleRaw.trim() : null;
-            const profile_photo_url =
-                typeof photoUrlRaw === 'string' && photoUrlRaw.trim() ? photoUrlRaw.trim() : null;
-            const docs = Array.isArray(docsRaw) ? docsRaw : [];
-
-            let staff = await prisma.staff.findUnique({ where: { phone_number } });
-
-            if (!staff) {
-                staff = await prisma.staff.create({
-                    data: {
-                        phone_number,
-                        name,
-                        gender,
-                        role_title,
-                        profile_photo_url,
-                        docs,
-                        is_phone_verified: false,
-                        is_photo_verified: false,
-                        is_docs_verified: false,
-                        kyc_status: 'PENDING',
-                    },
-                });
-            } else {
-                staff = await prisma.staff.update({
-                    where: { id: staff.id },
-                    data: {
-                        name,
-                        gender,
-                        role_title,
-                        profile_photo_url,
-                        docs,
-                        // Any profile update before admin check resets verification status.
-                        is_photo_verified: false,
-                        is_docs_verified: false,
-                        kyc_status: 'PENDING',
-                    },
-                });
-            }
-
-            await persistOtpAndSend(staff.id, phone_number);
-
-            const slim: PublicStaff = await prisma.staff.findUniqueOrThrow({
-                where: { id: staff.id },
-                select: publicStaffSelect,
-            });
-
-            return {
-                success: true as const,
-                message: 'Staff registered. OTP sent for phone verification.',
-                data: slim,
-            };
-        } catch (error) {
-            if (error instanceof MissingOtpSecretError) {
-                return {
-                    success: false as const,
-                    message: 'Server configuration error.',
-                    code: 'SERVER_CONFIG' as const,
-                };
-            }
-            console.error('Error in staff register', error);
             return {
                 success: false as const,
                 message: 'Internal server error. Please try again later.',
