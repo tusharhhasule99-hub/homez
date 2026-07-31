@@ -4,7 +4,7 @@ import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { sendError } from '../utils/sendResponse';
 
 const DEFAULT_BUCKET_NAME = 'homezy-526123657630-eu-north-1-an';
-const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 
 const upload = multer({
     storage: multer.memoryStorage(),
