@@ -1,5 +1,6 @@
 import type { Prisma } from '../../../generated/prisma/client';
 import { prisma } from '../../../utils/prisma';
+import { paginateResult } from '../../../utils/pagination';
 
 const adminAddressInclude = {
     user: { select: { id: true, name: true, phone_number: true } },
@@ -67,7 +68,13 @@ async function promoteFirstAsDefault(userId: string): Promise<void> {
 }
 
 class adminLocationsService {
-    list = async (opts: { userId?: string | null; q?: string | null }) => {
+    list = async (opts: {
+        userId?: string | null;
+        q?: string | null;
+        page: number;
+        pageSize: number;
+        skip: number;
+    }) => {
         try {
             const where: Prisma.AddressWhereInput = {};
             if (opts.userId) where.user_id = opts.userId;
@@ -79,16 +86,26 @@ class adminLocationsService {
                     { area: { contains: q, mode: 'insensitive' } },
                     { city: { contains: q, mode: 'insensitive' } },
                     { pincode: { contains: q } },
+                    { user: { name: { contains: q, mode: 'insensitive' } } },
+                    { user: { phone_number: { contains: q } } },
                 ];
             }
 
-            const rows = await prisma.address.findMany({
-                where,
-                orderBy: [{ created_at: 'desc' }],
-                take: 500,
-                include: adminAddressInclude,
-            });
-            return { success: true as const, message: 'OK', data: rows.map(mapAddress) };
+            const [total, rows] = await Promise.all([
+                prisma.address.count({ where }),
+                prisma.address.findMany({
+                    where,
+                    orderBy: [{ created_at: 'desc' }],
+                    skip: opts.skip,
+                    take: opts.pageSize,
+                    include: adminAddressInclude,
+                }),
+            ]);
+            return {
+                success: true as const,
+                message: 'OK',
+                data: paginateResult(rows.map(mapAddress), total, opts.page, opts.pageSize),
+            };
         } catch (e) {
             console.error('[admin locations] list', e);
             return {
@@ -108,6 +125,84 @@ class adminLocationsService {
             return { success: true as const, message: 'OK', data: mapAddress(row) };
         } catch (e) {
             console.error('[admin locations] getById', e);
+            return {
+                success: false as const,
+                message: 'Internal server error.',
+                code: 'INTERNAL_SERVER_ERROR' as const,
+            };
+        }
+    };
+
+    create = async (body: Record<string, unknown>) => {
+        try {
+            const userId = typeof body.user_id === 'string' ? body.user_id.trim() : '';
+            if (!userId) {
+                return { success: false as const, message: 'user_id is required.', code: 'VALIDATION' as const };
+            }
+            const user = await prisma.users.findFirst({ where: { id: userId, is_deleted: false } });
+            if (!user) {
+                return { success: false as const, message: 'User not found.', code: 'NOT_FOUND' as const };
+            }
+
+            const label = typeof body.label === 'string' ? body.label.trim() : '';
+            const line1 = typeof body.line1 === 'string' ? body.line1.trim() : '';
+            const area = typeof body.area === 'string' ? body.area.trim() : '';
+            const city = typeof body.city === 'string' ? body.city.trim() : '';
+            const pincode = typeof body.pincode === 'string' ? body.pincode.trim() : '';
+            const latitude = typeof body.latitude === 'number' ? body.latitude : Number(body.latitude);
+            const longitude = typeof body.longitude === 'number' ? body.longitude : Number(body.longitude);
+            const is_default = typeof body.is_default === 'boolean' ? body.is_default : false;
+
+            if (!label || !line1 || !area || !city || !pincode) {
+                return {
+                    success: false as const,
+                    message: 'label, line1, area, city, and pincode are required.',
+                    code: 'VALIDATION' as const,
+                };
+            }
+            if (!PINCODE_IN.test(pincode)) {
+                return {
+                    success: false as const,
+                    message: 'pincode must be a 6-digit Indian PIN code.',
+                    code: 'VALIDATION' as const,
+                };
+            }
+            const coordErr = validateCoords(latitude, longitude);
+            if (coordErr) return { success: false as const, message: coordErr, code: 'VALIDATION' as const };
+
+            const created = await prisma.address.create({
+                data: {
+                    user_id: userId,
+                    label,
+                    line1,
+                    area,
+                    city,
+                    pincode,
+                    latitude,
+                    longitude,
+                    is_default,
+                },
+                include: adminAddressInclude,
+            });
+
+            if (is_default) {
+                await setOnlyDefault(userId, created.id);
+            } else {
+                const defaults = await prisma.address.count({
+                    where: { user_id: userId, is_default: true },
+                });
+                if (defaults === 0) {
+                    await setOnlyDefault(userId, created.id);
+                }
+            }
+
+            const row = await prisma.address.findFirstOrThrow({
+                where: { id: created.id },
+                include: adminAddressInclude,
+            });
+            return { success: true as const, message: 'Location created.', data: mapAddress(row) };
+        } catch (e) {
+            console.error('[admin locations] create', e);
             return {
                 success: false as const,
                 message: 'Internal server error.',

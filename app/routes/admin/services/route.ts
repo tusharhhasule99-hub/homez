@@ -16,5 +16,8 @@ router.post(
 router.get('/:id', controller.getById);
 router.patch('/:id', controller.update);
 router.delete('/:id', controller.delete);
+router.post('/:id/slots', controller.createSlot);
+router.patch('/:id/slots/:slotId', controller.updateSlot);
+router.delete('/:id/slots/:slotId', controller.deleteSlot);
 
 export default router;

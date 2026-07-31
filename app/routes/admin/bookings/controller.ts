@@ -1,5 +1,6 @@
 import express from 'express';
 import { sendError, sendSuccess } from '../../../utils/sendResponse';
+import { parsePagination } from '../../../utils/pagination';
 import { BookingStatus } from '../../../generated/prisma/enums';
 import adminBookingsService from './service';
 
@@ -18,13 +19,15 @@ class adminBookingsController {
 
     list = async (req: express.Request, res: express.Response) => {
         try {
+            const { page, pageSize, skip } = parsePagination(req.query as Record<string, unknown>);
             const status = parseStatus(req.query.status);
             const userIdRaw = req.query.user_id;
             const userId =
                 typeof userIdRaw === 'string' && userIdRaw.trim()
                     ? userIdRaw.trim()
                     : null;
-            const result = await this.service.list({ status, userId });
+            const q = typeof req.query.q === 'string' ? req.query.q : null;
+            const result = await this.service.list({ status, userId, q, page, pageSize, skip });
             if (!result.success) {
                 return sendError(res, 500, result.message, result.code);
             }

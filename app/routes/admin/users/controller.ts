@@ -1,5 +1,6 @@
 import express from 'express';
 import { sendError, sendSuccess } from '../../../utils/sendResponse';
+import { parsePagination } from '../../../utils/pagination';
 import adminUsersService from './service';
 
 class adminUsersController {
@@ -8,9 +9,18 @@ class adminUsersController {
         this.service = new adminUsersService();
     }
 
-    list = async (_req: express.Request, res: express.Response) => {
+    list = async (req: express.Request, res: express.Response) => {
         try {
-            const result = await this.service.list();
+            const { page, pageSize, skip } = parsePagination(req.query as Record<string, unknown>);
+            const q = typeof req.query.q === 'string' ? req.query.q : null;
+            let is_active: boolean | null = null;
+            let is_verified: boolean | null = null;
+            if (req.query.is_active === 'true') is_active = true;
+            else if (req.query.is_active === 'false') is_active = false;
+            if (req.query.is_verified === 'true') is_verified = true;
+            else if (req.query.is_verified === 'false') is_verified = false;
+
+            const result = await this.service.list({ page, pageSize, skip, q, is_active, is_verified });
             if (!result.success) {
                 return sendError(res, 500, result.message, result.code);
             }

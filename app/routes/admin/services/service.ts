@@ -1,5 +1,6 @@
 import type { Prisma } from '../../../generated/prisma/client';
 import { prisma } from '../../../utils/prisma';
+import { paginateResult } from '../../../utils/pagination';
 
 const adminServiceInclude = {
     slots: { orderBy: { sort_order: 'asc' as const } },
@@ -120,15 +121,38 @@ function validateService(body: Record<string, unknown>, partial: boolean):
 }
 
 class adminServicesService {
-    list = async (opts: { includeDeleted: boolean }) => {
+    list = async (opts: {
+        includeDeleted: boolean;
+        q?: string | null;
+        page: number;
+        pageSize: number;
+        skip: number;
+    }) => {
         try {
             const where: Prisma.ServiceWhereInput = opts.includeDeleted ? {} : { is_deleted: false };
-            const rows = await prisma.service.findMany({
-                where,
-                orderBy: [{ sort_order: 'asc' }, { created_at: 'desc' }],
-                include: adminServiceInclude,
-            });
-            return { success: true as const, message: 'OK', data: rows.map(mapService) };
+            if (opts.q?.trim()) {
+                const q = opts.q.trim();
+                where.OR = [
+                    { title: { contains: q, mode: 'insensitive' } },
+                    { slug: { contains: q, mode: 'insensitive' } },
+                    { description: { contains: q, mode: 'insensitive' } },
+                ];
+            }
+            const [total, rows] = await Promise.all([
+                prisma.service.count({ where }),
+                prisma.service.findMany({
+                    where,
+                    orderBy: [{ sort_order: 'asc' }, { created_at: 'desc' }],
+                    skip: opts.skip,
+                    take: opts.pageSize,
+                    include: adminServiceInclude,
+                }),
+            ]);
+            return {
+                success: true as const,
+                message: 'OK',
+                data: paginateResult(rows.map(mapService), total, opts.page, opts.pageSize),
+            };
         } catch (e) {
             console.error('[admin services] list', e);
             return {
@@ -234,6 +258,131 @@ class adminServicesService {
             return { success: true as const, message: 'Service deleted.' };
         } catch (e) {
             console.error('[admin services] delete', e);
+            return {
+                success: false as const,
+                message: 'Internal server error.',
+                code: 'INTERNAL_SERVER_ERROR' as const,
+            };
+        }
+    };
+
+    upsertSlot = async (serviceId: string, body: Record<string, unknown>, slotId?: string) => {
+        try {
+            const service = await prisma.service.findFirst({ where: { id: serviceId, is_deleted: false } });
+            if (!service) {
+                return { success: false as const, message: 'Service not found.', code: 'NOT_FOUND' as const };
+            }
+
+            const slotTypeRaw = typeof body.slot_type === 'string' ? body.slot_type.trim().toLowerCase() : '';
+            const slot_type = slotTypeRaw === 'scheduled' ? 'scheduled' : slotTypeRaw === 'instant' ? 'instant' : null;
+            if (!slot_type && !slotId) {
+                return { success: false as const, message: 'slot_type must be instant or scheduled.', code: 'VALIDATION' as const };
+            }
+
+            const duration_label =
+                typeof body.duration_label === 'string' ? body.duration_label.trim() : '';
+            const duration_minutes = Number(body.duration_minutes);
+            const price = Number(body.price);
+            const slashRaw = body.slash_price;
+            const slash_price =
+                slashRaw === null || slashRaw === '' || slashRaw === undefined
+                    ? null
+                    : Number(slashRaw);
+            const sort_order = body.sort_order !== undefined ? Math.trunc(Number(body.sort_order)) : 0;
+            const is_active = typeof body.is_active === 'boolean' ? body.is_active : true;
+
+            if (!slotId) {
+                if (!duration_label) {
+                    return { success: false as const, message: 'duration_label is required.', code: 'VALIDATION' as const };
+                }
+                if (!Number.isFinite(duration_minutes) || duration_minutes <= 0) {
+                    return { success: false as const, message: 'duration_minutes must be a positive number.', code: 'VALIDATION' as const };
+                }
+                if (!Number.isFinite(price) || price < 0) {
+                    return { success: false as const, message: 'price must be a non-negative number.', code: 'VALIDATION' as const };
+                }
+                if (slash_price != null && (!Number.isFinite(slash_price) || slash_price < 0)) {
+                    return { success: false as const, message: 'slash_price must be a non-negative number.', code: 'VALIDATION' as const };
+                }
+
+                const created = await prisma.slot.create({
+                    data: {
+                        service_id: serviceId,
+                        slot_type: slot_type!,
+                        duration_label,
+                        duration_minutes: Math.trunc(duration_minutes),
+                        price,
+                        slash_price,
+                        sort_order: Number.isFinite(sort_order) ? sort_order : 0,
+                        is_active,
+                    },
+                });
+                const row = await prisma.service.findFirstOrThrow({
+                    where: { id: serviceId },
+                    include: adminServiceInclude,
+                });
+                return {
+                    success: true as const,
+                    message: 'Slot created.',
+                    data: { service: mapService(row), slot_id: created.id },
+                };
+            }
+
+            const existing = await prisma.slot.findFirst({ where: { id: slotId, service_id: serviceId } });
+            if (!existing) {
+                return { success: false as const, message: 'Slot not found.', code: 'NOT_FOUND' as const };
+            }
+
+            const data: Prisma.SlotUpdateInput = {};
+            if (slot_type) data.slot_type = slot_type;
+            if (duration_label) data.duration_label = duration_label;
+            if (Number.isFinite(duration_minutes) && duration_minutes > 0) {
+                data.duration_minutes = Math.trunc(duration_minutes);
+            }
+            if (Number.isFinite(price) && price >= 0) data.price = price;
+            if (slashRaw === null || slashRaw === '') data.slash_price = null;
+            else if (slash_price != null && Number.isFinite(slash_price)) data.slash_price = slash_price;
+            if (body.sort_order !== undefined && Number.isFinite(sort_order)) data.sort_order = sort_order;
+            if (typeof body.is_active === 'boolean') data.is_active = body.is_active;
+            if (typeof body.is_deleted === 'boolean') data.is_deleted = body.is_deleted;
+
+            await prisma.slot.update({ where: { id: slotId }, data });
+            const row = await prisma.service.findFirstOrThrow({
+                where: { id: serviceId },
+                include: adminServiceInclude,
+            });
+            return {
+                success: true as const,
+                message: 'Slot updated.',
+                data: { service: mapService(row), slot_id: slotId },
+            };
+        } catch (e) {
+            console.error('[admin services] upsertSlot', e);
+            return {
+                success: false as const,
+                message: 'Internal server error.',
+                code: 'INTERNAL_SERVER_ERROR' as const,
+            };
+        }
+    };
+
+    softDeleteSlot = async (serviceId: string, slotId: string) => {
+        try {
+            const existing = await prisma.slot.findFirst({ where: { id: slotId, service_id: serviceId } });
+            if (!existing) {
+                return { success: false as const, message: 'Slot not found.', code: 'NOT_FOUND' as const };
+            }
+            await prisma.slot.update({
+                where: { id: slotId },
+                data: { is_deleted: true, is_active: false },
+            });
+            const row = await prisma.service.findFirstOrThrow({
+                where: { id: serviceId },
+                include: adminServiceInclude,
+            });
+            return { success: true as const, message: 'Slot deleted.', data: mapService(row) };
+        } catch (e) {
+            console.error('[admin services] softDeleteSlot', e);
             return {
                 success: false as const,
                 message: 'Internal server error.',

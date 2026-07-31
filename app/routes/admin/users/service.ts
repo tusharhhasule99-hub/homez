@@ -1,6 +1,7 @@
 import type { Prisma } from '../../../generated/prisma/client';
 import { prisma } from '../../../utils/prisma';
 import { normalizePhoneForStorage } from '../../../utils/phone';
+import { paginateResult, type Paginated } from '../../../utils/pagination';
 
 export const publicUserAdminSelect = {
     id: true,
@@ -31,15 +32,39 @@ export type PublicUserAdmin = {
 };
 
 class adminUsersService {
-    list = async () => {
+    list = async (opts: {
+        page: number;
+        pageSize: number;
+        skip: number;
+        q?: string | null;
+        is_active?: boolean | null;
+        is_verified?: boolean | null;
+    }) => {
         try {
-            const rows = await prisma.users.findMany({
-                where: { is_deleted: false },
-                orderBy: { created_at: 'desc' },
-                take: 500,
-                select: publicUserAdminSelect,
-            });
-            return { success: true as const, message: 'OK', data: rows };
+            const where: Prisma.UsersWhereInput = { is_deleted: false };
+            if (opts.is_active != null) where.is_active = opts.is_active;
+            if (opts.is_verified != null) where.is_verified = opts.is_verified;
+            if (opts.q?.trim()) {
+                const q = opts.q.trim();
+                where.OR = [
+                    { name: { contains: q, mode: 'insensitive' } },
+                    { phone_number: { contains: q } },
+                ];
+            }
+
+            const [total, rows] = await Promise.all([
+                prisma.users.count({ where }),
+                prisma.users.findMany({
+                    where,
+                    orderBy: { created_at: 'desc' },
+                    skip: opts.skip,
+                    take: opts.pageSize,
+                    select: publicUserAdminSelect,
+                }),
+            ]);
+
+            const data: Paginated<PublicUserAdmin> = paginateResult(rows, total, opts.page, opts.pageSize);
+            return { success: true as const, message: 'OK', data };
         } catch (error) {
             console.error('Error in admin users list', error);
             return {

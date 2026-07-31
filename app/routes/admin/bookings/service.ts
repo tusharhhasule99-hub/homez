@@ -1,9 +1,11 @@
 import type { Prisma } from '../../../generated/prisma/client';
 import { BookingStatus } from '../../../generated/prisma/enums';
 import { prisma } from '../../../utils/prisma';
+import { paginateResult } from '../../../utils/pagination';
 
 const ALL_STATUSES: BookingStatus[] = [
     BookingStatus.CREATED,
+    BookingStatus.AWAITING_STAFF,
     BookingStatus.ACCEPTED,
     BookingStatus.REJECTED,
     BookingStatus.ASSIGNING_STAFF,
@@ -95,19 +97,45 @@ function mapBooking(row: BookingRow): AdminBooking {
 }
 
 class adminBookingsService {
-    list = async (opts: { status?: BookingStatus | null; userId?: string | null }) => {
+    list = async (opts: {
+        status?: BookingStatus | null;
+        userId?: string | null;
+        q?: string | null;
+        page: number;
+        pageSize: number;
+        skip: number;
+    }) => {
         try {
             const where: Prisma.BookingWhereInput = {};
             if (opts.status) where.status = opts.status;
             if (opts.userId) where.user_id = opts.userId;
+            if (opts.q?.trim()) {
+                const q = opts.q.trim();
+                where.OR = [
+                    { id: { contains: q, mode: 'insensitive' } },
+                    { applied_coupon_code: { contains: q, mode: 'insensitive' } },
+                    { staff_name: { contains: q, mode: 'insensitive' } },
+                    { user: { name: { contains: q, mode: 'insensitive' } } },
+                    { user: { phone_number: { contains: q } } },
+                    { service: { title: { contains: q, mode: 'insensitive' } } },
+                ];
+            }
 
-            const rows = await prisma.booking.findMany({
-                where,
-                orderBy: { created_at: 'desc' },
-                take: 500,
-                include: adminBookingInclude,
-            });
-            return { success: true as const, message: 'OK', data: rows.map(mapBooking) };
+            const [total, rows] = await Promise.all([
+                prisma.booking.count({ where }),
+                prisma.booking.findMany({
+                    where,
+                    orderBy: { created_at: 'desc' },
+                    skip: opts.skip,
+                    take: opts.pageSize,
+                    include: adminBookingInclude,
+                }),
+            ]);
+            return {
+                success: true as const,
+                message: 'OK',
+                data: paginateResult(rows.map(mapBooking), total, opts.page, opts.pageSize),
+            };
         } catch (e) {
             console.error('[admin bookings] list', e);
             return {

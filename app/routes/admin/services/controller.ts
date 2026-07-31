@@ -1,5 +1,6 @@
 import express from 'express';
 import { sendError, sendSuccess } from '../../../utils/sendResponse';
+import { parsePagination } from '../../../utils/pagination';
 import adminServicesService from './service';
 
 class adminServicesController {
@@ -10,9 +11,11 @@ class adminServicesController {
 
     list = async (req: express.Request, res: express.Response) => {
         try {
+            const { page, pageSize, skip } = parsePagination(req.query as Record<string, unknown>);
             const includeDeleted =
                 req.query.include_deleted === 'true' || req.query.include_deleted === '1';
-            const result = await this.service.list({ includeDeleted });
+            const q = typeof req.query.q === 'string' ? req.query.q : null;
+            const result = await this.service.list({ includeDeleted, q, page, pageSize, skip });
             if (!result.success) {
                 return sendError(res, 500, result.message, result.code);
             }
@@ -115,6 +118,68 @@ class adminServicesController {
             });
         } catch (e) {
             console.error('[admin services controller] upload', e);
+            return sendError(res, 500, 'Internal server error', 'INTERNAL_SERVER_ERROR');
+        }
+    };
+
+    createSlot = async (req: express.Request, res: express.Response) => {
+        try {
+            const serviceId = typeof req.params.id === 'string' ? req.params.id : req.params.id?.[0];
+            if (!serviceId) return sendError(res, 400, 'id is required', 'VALIDATION');
+            const body = req.body;
+            if (!body || typeof body !== 'object') {
+                return sendError(res, 400, 'JSON body required', 'VALIDATION');
+            }
+            const result = await this.service.upsertSlot(serviceId, body as Record<string, unknown>);
+            if (!result.success) {
+                let status = 400;
+                if (result.code === 'NOT_FOUND') status = 404;
+                else if (result.code === 'INTERNAL_SERVER_ERROR') status = 500;
+                return sendError(res, status, result.message, result.code);
+            }
+            return sendSuccess(res, 201, result.message, result.data);
+        } catch (e) {
+            console.error('[admin services controller] createSlot', e);
+            return sendError(res, 500, 'Internal server error', 'INTERNAL_SERVER_ERROR');
+        }
+    };
+
+    updateSlot = async (req: express.Request, res: express.Response) => {
+        try {
+            const serviceId = typeof req.params.id === 'string' ? req.params.id : req.params.id?.[0];
+            const slotId = typeof req.params.slotId === 'string' ? req.params.slotId : req.params.slotId?.[0];
+            if (!serviceId || !slotId) return sendError(res, 400, 'id and slotId are required', 'VALIDATION');
+            const body = req.body;
+            if (!body || typeof body !== 'object') {
+                return sendError(res, 400, 'JSON body required', 'VALIDATION');
+            }
+            const result = await this.service.upsertSlot(serviceId, body as Record<string, unknown>, slotId);
+            if (!result.success) {
+                let status = 400;
+                if (result.code === 'NOT_FOUND') status = 404;
+                else if (result.code === 'INTERNAL_SERVER_ERROR') status = 500;
+                return sendError(res, status, result.message, result.code);
+            }
+            return sendSuccess(res, 200, result.message, result.data);
+        } catch (e) {
+            console.error('[admin services controller] updateSlot', e);
+            return sendError(res, 500, 'Internal server error', 'INTERNAL_SERVER_ERROR');
+        }
+    };
+
+    deleteSlot = async (req: express.Request, res: express.Response) => {
+        try {
+            const serviceId = typeof req.params.id === 'string' ? req.params.id : req.params.id?.[0];
+            const slotId = typeof req.params.slotId === 'string' ? req.params.slotId : req.params.slotId?.[0];
+            if (!serviceId || !slotId) return sendError(res, 400, 'id and slotId are required', 'VALIDATION');
+            const result = await this.service.softDeleteSlot(serviceId, slotId);
+            if (!result.success) {
+                const status = result.code === 'NOT_FOUND' ? 404 : 500;
+                return sendError(res, status, result.message, result.code);
+            }
+            return sendSuccess(res, 200, result.message, result.data);
+        } catch (e) {
+            console.error('[admin services controller] deleteSlot', e);
             return sendError(res, 500, 'Internal server error', 'INTERNAL_SERVER_ERROR');
         }
     };
