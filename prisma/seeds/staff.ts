@@ -48,19 +48,26 @@ const STAFF_ROWS = [
 
 export async function seedStaff() {
     for (const row of STAFF_ROWS) {
+        const [first_name, ...rest] = row.name.split(' ');
+        const last_name = rest.join(' ') || first_name;
         await prisma.staff.upsert({
             where: { phone_number: row.phone_number },
             create: {
                 phone_number: row.phone_number,
                 name: row.name,
+                first_name,
+                last_name,
                 gender: row.gender,
                 role_title: row.role_title,
+                expertise: row.role_title,
                 is_active: true,
                 is_deleted: false,
                 is_phone_verified: true,
                 is_photo_verified: true,
                 is_docs_verified: true,
                 kyc_status: 'VERIFIED',
+                is_onboarding_completed: true,
+                onboarding_step: 2,
                 latitude: row.latitude,
                 longitude: row.longitude,
                 is_available: true,
@@ -68,14 +75,19 @@ export async function seedStaff() {
             },
             update: {
                 name: row.name,
+                first_name,
+                last_name,
                 gender: row.gender,
                 role_title: row.role_title,
+                expertise: row.role_title,
                 is_active: true,
                 is_deleted: false,
                 is_phone_verified: true,
                 is_photo_verified: true,
                 is_docs_verified: true,
                 kyc_status: 'VERIFIED',
+                is_onboarding_completed: true,
+                onboarding_step: 2,
                 latitude: row.latitude,
                 longitude: row.longitude,
                 is_available: true,

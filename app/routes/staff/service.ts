@@ -3,7 +3,7 @@ import { hashOtp, MissingOtpSecretError, OTP_TTL_MS, verifyOtpHash, generateOtpC
 import { normalizePhoneForStorage } from '../../utils/phone';
 import { prisma } from '../../utils/prisma';
 import { signStaffAccessToken, MissingStaffJwtSecretError } from '../../utils/authToken';
-import { publicStaffSelect, type PublicStaff } from './staffPublic';
+import { publicStaffSelect, staffDisplayName, type PublicStaff } from './staffPublic';
 import { expireStaffOffers } from './jobs/dispatchService';
 
 const DEV_STATIC_OTP = '123456';
@@ -189,7 +189,7 @@ class staffService {
 
     /**
      * OTP login (phone only). Creates staff on first login if missing.
-     * Optional profile fields (name, gender, …) update the record when sent.
+     * Optional profile fields (first_name / last_name, gender, …) update the record when sent.
      */
     login = async (body: Record<string, unknown>) => {
         try {
@@ -203,28 +203,42 @@ class staffService {
                 return { success: false as const, message: 'phone_number is required.', code: 'VALIDATION' as const };
             }
 
+            const firstRaw = body.first_name;
+            const lastRaw = body.last_name;
             const nameRaw = body.name;
             const genderRaw = body.gender;
             const roleTitleRaw = body.role_title;
             const photoUrlRaw = body.profile_photo_url;
             const docsRaw = body.docs;
 
+            const hasFirst = typeof firstRaw === 'string' && !!firstRaw.trim();
+            const hasLast = typeof lastRaw === 'string' && !!lastRaw.trim();
+            const hasNameParts = hasFirst && hasLast;
             const hasName = typeof nameRaw === 'string' && !!nameRaw.trim();
             const hasGender = typeof genderRaw === 'string' && !!genderRaw.trim();
             const hasRoleTitle = typeof roleTitleRaw === 'string' && !!roleTitleRaw.trim();
             const hasPhoto = typeof photoUrlRaw === 'string' && !!photoUrlRaw.trim();
             const hasDocs = Array.isArray(docsRaw);
-            const hasProfileUpdate = hasName || hasGender || hasRoleTitle || hasPhoto || hasDocs;
+            const hasProfileUpdate =
+                hasNameParts || hasName || hasGender || hasRoleTitle || hasPhoto || hasDocs;
 
             let staff = await prisma.staff.findUnique({ where: { phone_number } });
 
             if (!staff) {
-                // Phone-only OTP login — same pattern as customer auth. Name can be filled later.
-                const defaultName = hasName ? (nameRaw as string).trim() : `Staff ${phone_number.slice(-4)}`;
+                // Phone-only OTP login — same pattern as customer auth. Name filled in onboarding.
+                const first_name = hasFirst ? (firstRaw as string).trim() : 'Staff';
+                const last_name = hasLast ? (lastRaw as string).trim() : phone_number.slice(-4);
+                const name = hasNameParts
+                    ? staffDisplayName(first_name, last_name)
+                    : hasName
+                      ? (nameRaw as string).trim()
+                      : staffDisplayName(first_name, last_name);
                 staff = await prisma.staff.create({
                     data: {
                         phone_number,
-                        name: defaultName,
+                        name,
+                        first_name,
+                        last_name,
                         gender: hasGender ? (genderRaw as string).trim().toLowerCase() : null,
                         role_title: hasRoleTitle ? (roleTitleRaw as string).trim() : null,
                         profile_photo_url: hasPhoto ? (photoUrlRaw as string).trim() : null,
@@ -241,10 +255,22 @@ class staffService {
                 }
 
                 if (hasProfileUpdate) {
+                    const nameUpdate = hasNameParts
+                        ? {
+                              first_name: (firstRaw as string).trim(),
+                              last_name: (lastRaw as string).trim(),
+                              name: staffDisplayName(
+                                  (firstRaw as string).trim(),
+                                  (lastRaw as string).trim(),
+                              ),
+                          }
+                        : hasName
+                          ? { name: (nameRaw as string).trim() }
+                          : {};
                     staff = await prisma.staff.update({
                         where: { id: staff.id },
                         data: {
-                            ...(hasName ? { name: (nameRaw as string).trim() } : {}),
+                            ...nameUpdate,
                             ...(hasGender ? { gender: (genderRaw as string).trim().toLowerCase() } : {}),
                             ...(hasRoleTitle ? { role_title: (roleTitleRaw as string).trim() } : {}),
                             ...(hasPhoto ? { profile_photo_url: (photoUrlRaw as string).trim() } : {}),
@@ -429,7 +455,7 @@ class staffService {
 
     /**
      * Staff onboarding (JWT required).
-     * Step 1 — name, profile_photo_url, gender, optional role_title (+ extras)
+     * Step 1 — profile_photo_url, first_name, last_name, expertise, years_experience, work_city
      * Step 2 — docs (upload via POST /staff/upload?use_case=media, then pass metadata)
      */
     submitOnboardingStep = async (staffId: string, body: Record<string, unknown>) => {
@@ -438,7 +464,7 @@ class staffService {
             if (step !== 1 && step !== 2) {
                 return {
                     success: false as const,
-                    message: 'step must be 1 (profile + photo) or 2 (documents).',
+                    message: 'step must be 1 (profile) or 2 (documents).',
                     code: 'INVALID_STEP' as const,
                 };
             }
@@ -473,18 +499,30 @@ class staffService {
                     };
                 }
 
-                const nameRaw = body.name;
-                if (typeof nameRaw !== 'string' || !nameRaw.trim()) {
-                    return { success: false as const, message: 'name is required.', code: 'VALIDATION' as const };
-                }
-                const name = nameRaw.trim();
-                if (name.length > 200) {
+                const firstRaw = typeof body.first_name === 'string' ? body.first_name.trim() : '';
+                const lastRaw = typeof body.last_name === 'string' ? body.last_name.trim() : '';
+                if (!firstRaw) {
                     return {
                         success: false as const,
-                        message: 'name must be at most 200 characters.',
+                        message: 'first_name is required.',
                         code: 'VALIDATION' as const,
                     };
                 }
+                if (!lastRaw) {
+                    return {
+                        success: false as const,
+                        message: 'last_name is required.',
+                        code: 'VALIDATION' as const,
+                    };
+                }
+                if (firstRaw.length > 100 || lastRaw.length > 100) {
+                    return {
+                        success: false as const,
+                        message: 'first_name and last_name must be at most 100 characters each.',
+                        code: 'VALIDATION' as const,
+                    };
+                }
+                const name = staffDisplayName(firstRaw, lastRaw);
 
                 let profile_photo_url =
                     typeof body.profile_photo_url === 'string' ? body.profile_photo_url.trim() : '';
@@ -500,26 +538,82 @@ class staffService {
                     };
                 }
 
-                const genderRaw = typeof body.gender === 'string' ? body.gender.trim().toLowerCase() : '';
-                if (!['male', 'female', 'other'].includes(genderRaw)) {
+                const expertiseRaw =
+                    typeof body.expertise === 'string'
+                        ? body.expertise.trim()
+                        : typeof body.role_title === 'string'
+                          ? body.role_title.trim()
+                          : '';
+                if (!expertiseRaw) {
                     return {
                         success: false as const,
-                        message: 'gender must be one of: male, female, other.',
+                        message: 'expertise is required.',
+                        code: 'VALIDATION' as const,
+                    };
+                }
+                if (expertiseRaw.length > 120) {
+                    return {
+                        success: false as const,
+                        message: 'expertise must be at most 120 characters.',
                         code: 'VALIDATION' as const,
                     };
                 }
 
-                const role_title =
-                    typeof body.role_title === 'string' && body.role_title.trim()
-                        ? body.role_title.trim()
-                        : null;
+                const yearsRaw = body.years_experience ?? body.year_experience;
+                const years_experience = Number(yearsRaw);
+                if (
+                    yearsRaw === undefined ||
+                    yearsRaw === null ||
+                    yearsRaw === '' ||
+                    !Number.isFinite(years_experience) ||
+                    years_experience < 0 ||
+                    years_experience > 60 ||
+                    Math.floor(years_experience) !== years_experience
+                ) {
+                    return {
+                        success: false as const,
+                        message: 'years_experience must be an integer from 0 to 60.',
+                        code: 'VALIDATION' as const,
+                    };
+                }
+
+                const work_city =
+                    typeof body.work_city === 'string'
+                        ? body.work_city.trim()
+                        : typeof body.city_of_work === 'string'
+                          ? body.city_of_work.trim()
+                          : '';
+                if (!work_city) {
+                    return {
+                        success: false as const,
+                        message: 'work_city is required.',
+                        code: 'VALIDATION' as const,
+                    };
+                }
+                if (work_city.length > 120) {
+                    return {
+                        success: false as const,
+                        message: 'work_city must be at most 120 characters.',
+                        code: 'VALIDATION' as const,
+                    };
+                }
+
+                const genderRaw =
+                    typeof body.gender === 'string' ? body.gender.trim().toLowerCase() : '';
+                const gender =
+                    genderRaw && ['male', 'female', 'other'].includes(genderRaw) ? genderRaw : null;
 
                 const updated: PublicStaff = await prisma.staff.update({
                     where: { id: staffId },
                     data: {
+                        first_name: firstRaw,
+                        last_name: lastRaw,
                         name,
-                        gender: genderRaw,
-                        role_title,
+                        gender,
+                        expertise: expertiseRaw,
+                        role_title: expertiseRaw,
+                        years_experience,
+                        work_city,
                         profile_photo_url,
                         is_photo_verified: false,
                         kyc_status: 'PENDING',
@@ -542,7 +636,7 @@ class staffService {
             if (staff.onboarding_step !== 2) {
                 return {
                     success: false as const,
-                    message: 'Complete step 1 (profile + photo) first.',
+                    message: 'Complete step 1 (profile) first.',
                     code: 'INVALID_STEP_ORDER' as const,
                 };
             }
@@ -550,7 +644,6 @@ class staffService {
             const docsRaw = body.docs;
             const docs = Array.isArray(docsRaw) ? docsRaw : null;
             if (!docs || docs.length === 0) {
-                // Allow completing if media was already uploaded via /staff/upload?use_case=media
                 const existingDocs = Array.isArray(staff.docs) ? staff.docs : [];
                 if (existingDocs.length === 0) {
                     return {

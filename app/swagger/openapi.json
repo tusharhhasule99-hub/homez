@@ -726,7 +726,7 @@
           "Staff"
         ],
         "summary": "Submit staff onboarding step",
-        "description": "**Step 1:** `name`, `profile_photo_url`, `gender` (male|female|other), optional `role_title`. Upload photo via `POST /staff/upload?use_case=profile` first. **Step 2:** `docs` array (upload via `POST /staff/upload?use_case=media`). Completing step 2 sets `is_onboarding_completed=true`. Requires verified staff JWT.",
+        "description": "**Step 1:** `first_name`, `last_name`, `profile_photo_url`, `expertise`, `years_experience`, `work_city` (optional `gender`). Upload photo via `POST /staff/upload?use_case=profile` first. **Step 2:** `docs` array (upload via `POST /staff/upload?use_case=media`). Completing step 2 sets `is_onboarding_completed=true`. Requires verified staff JWT.",
         "security": [
           {
             "staffBearerAuth": []
@@ -741,13 +741,15 @@
               },
               "examples": {
                 "step1": {
-                  "summary": "Profile + photo",
+                  "summary": "Profile + photo + expertise",
                   "value": {
                     "step": 1,
-                    "name": "Ravi Kumar",
-                    "gender": "male",
-                    "role_title": "Electrician",
-                    "profile_photo_url": "https://cdn.example.com/staff/ravi.jpg"
+                    "first_name": "Ravi",
+                    "last_name": "Kumar",
+                    "profile_photo_url": "https://cdn.example.com/staff/ravi.jpg",
+                    "expertise": "Electrician",
+                    "years_experience": 5,
+                    "work_city": "Pune"
                   }
                 },
                 "step2": {
@@ -3084,8 +3086,18 @@
           },
           "name": {
             "type": "string",
-            "description": "Optional. Updates display name when provided; not required for OTP login.",
+            "description": "Optional legacy full name. Prefer first_name + last_name.",
             "example": "Ravi Kumar"
+          },
+          "first_name": {
+            "type": "string",
+            "description": "Optional. Updates first name when provided.",
+            "example": "Ravi"
+          },
+          "last_name": {
+            "type": "string",
+            "description": "Optional. Updates last name when provided.",
+            "example": "Kumar"
           },
           "gender": {
             "type": "string",
@@ -3123,13 +3135,34 @@
             "type": "string"
           },
           "name": {
-            "type": "string"
+            "type": "string",
+            "description": "Denormalized display name (first + last)"
+          },
+          "first_name": {
+            "type": "string",
+            "nullable": true
+          },
+          "last_name": {
+            "type": "string",
+            "nullable": true
           },
           "gender": {
             "type": "string",
             "nullable": true
           },
           "role_title": {
+            "type": "string",
+            "nullable": true
+          },
+          "expertise": {
+            "type": "string",
+            "nullable": true
+          },
+          "years_experience": {
+            "type": "integer",
+            "nullable": true
+          },
+          "work_city": {
             "type": "string",
             "nullable": true
           },
@@ -3268,7 +3301,34 @@
           },
           "name": {
             "type": "string",
+            "description": "Deprecated for step 1 — use first_name + last_name"
+          },
+          "first_name": {
+            "type": "string",
             "description": "Required for step 1"
+          },
+          "last_name": {
+            "type": "string",
+            "description": "Required for step 1"
+          },
+          "profile_photo_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Required for step 1 (upload via use_case=profile first)"
+          },
+          "expertise": {
+            "type": "string",
+            "description": "Required for step 1 (skill / trade)"
+          },
+          "years_experience": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 60,
+            "description": "Required for step 1. Alias: year_experience"
+          },
+          "work_city": {
+            "type": "string",
+            "description": "Required for step 1 (city of work). Alias: city_of_work"
           },
           "gender": {
             "type": "string",
@@ -3277,17 +3337,7 @@
               "female",
               "other"
             ],
-            "description": "Required for step 1"
-          },
-          "role_title": {
-            "type": "string",
-            "nullable": true,
-            "description": "Optional extra for step 1"
-          },
-          "profile_photo_url": {
-            "type": "string",
-            "format": "uri",
-            "description": "Required for step 1 (upload via use_case=profile first)"
+            "description": "Optional for step 1"
           },
           "docs": {
             "type": "array",

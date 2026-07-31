@@ -49,9 +49,20 @@ model Users {
 model Staff {
   id           String @id @default(uuid())
   phone_number String @unique
+  /// Denormalized display name (`first_name` + `last_name`). Kept for bookings/dispatch.
   name         String
+  first_name   String?
+  last_name    String?
   gender       String?
+  /// Display / legacy title (kept in sync with expertise when set).
   role_title   String?
+
+  /// Onboarding: skill / trade (e.g. Electrician, Deep cleaning).
+  expertise         String?
+  /// Onboarding: years of experience (0+).
+  years_experience  Int?
+  /// Onboarding: primary city of work.
+  work_city         String?
 
   is_active          Boolean @default(true)
   is_deleted         Boolean @default(false)
@@ -62,7 +73,7 @@ model Staff {
 
   /// App routing after OTP verify (same pattern as Users).
   is_onboarding_completed Boolean @default(false)
-  /// 1 = profile (name + photo + extras); 2 = docs; then completed.
+  /// 1 = profile pic + first/last name + expertise + years + city; 2 = docs; then completed.
   onboarding_step         Int     @default(1)
 
   profile_photo_url String?

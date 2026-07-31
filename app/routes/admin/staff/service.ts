@@ -2,7 +2,7 @@ import type { Prisma } from '../../../generated/prisma/client';
 import { prisma } from '../../../utils/prisma';
 import { normalizePhoneForStorage } from '../../../utils/phone';
 import { paginateResult } from '../../../utils/pagination';
-import { publicStaffSelect, type PublicStaff } from '../../staff/staffPublic';
+import { publicStaffSelect, staffDisplayName, type PublicStaff } from '../../staff/staffPublic';
 
 class adminStaffService {
     list = async (opts: {
@@ -23,8 +23,12 @@ class adminStaffService {
                 const q = opts.q.trim();
                 where.OR = [
                     { name: { contains: q, mode: 'insensitive' } },
+                    { first_name: { contains: q, mode: 'insensitive' } },
+                    { last_name: { contains: q, mode: 'insensitive' } },
                     { phone_number: { contains: q } },
                     { role_title: { contains: q, mode: 'insensitive' } },
+                    { expertise: { contains: q, mode: 'insensitive' } },
+                    { work_city: { contains: q, mode: 'insensitive' } },
                 ];
             }
 
@@ -76,12 +80,21 @@ class adminStaffService {
     create = async (body: Record<string, unknown>) => {
         try {
             const phoneRaw = body.phone_number;
-            const nameRaw = body.name;
             if (typeof phoneRaw !== 'string' || !phoneRaw.trim()) {
                 return { success: false as const, message: 'phone_number is required.', code: 'VALIDATION' as const };
             }
-            if (typeof nameRaw !== 'string' || !nameRaw.trim()) {
-                return { success: false as const, message: 'name is required.', code: 'VALIDATION' as const };
+
+            const firstRaw = typeof body.first_name === 'string' ? body.first_name.trim() : '';
+            const lastRaw = typeof body.last_name === 'string' ? body.last_name.trim() : '';
+            const nameFallback = typeof body.name === 'string' ? body.name.trim() : '';
+            if (!firstRaw || !lastRaw) {
+                if (!nameFallback) {
+                    return {
+                        success: false as const,
+                        message: 'first_name and last_name are required (or name).',
+                        code: 'VALIDATION' as const,
+                    };
+                }
             }
 
             const phone_number = normalizePhoneForStorage(phoneRaw);
@@ -98,19 +111,50 @@ class adminStaffService {
                 };
             }
 
+            const first_name = firstRaw || nameFallback.split(/\s+/)[0] || nameFallback;
+            const last_name =
+                lastRaw ||
+                (nameFallback.includes(' ')
+                    ? nameFallback.split(/\s+/).slice(1).join(' ')
+                    : '');
+            const name =
+                firstRaw && lastRaw
+                    ? staffDisplayName(firstRaw, lastRaw)
+                    : nameFallback || staffDisplayName(first_name, last_name || first_name);
+
             const gender =
                 typeof body.gender === 'string' && body.gender.trim() ? body.gender.trim().toLowerCase() : null;
             const role_title =
                 typeof body.role_title === 'string' && body.role_title.trim() ? body.role_title.trim() : null;
+            const expertise =
+                typeof body.expertise === 'string' && body.expertise.trim()
+                    ? body.expertise.trim()
+                    : role_title;
+            const work_city =
+                typeof body.work_city === 'string' && body.work_city.trim() ? body.work_city.trim() : null;
+            const yearsRaw = body.years_experience;
+            const years_experience =
+                yearsRaw !== undefined && yearsRaw !== null && yearsRaw !== '' && Number.isFinite(Number(yearsRaw))
+                    ? Math.floor(Number(yearsRaw))
+                    : null;
+
+            const profileData = {
+                name,
+                first_name,
+                last_name: last_name || null,
+                gender,
+                role_title: role_title ?? expertise,
+                expertise,
+                years_experience,
+                work_city,
+            };
 
             let row: PublicStaff;
             if (existing?.is_deleted) {
                 row = await prisma.staff.update({
                     where: { id: existing.id },
                     data: {
-                        name: nameRaw.trim(),
-                        gender,
-                        role_title,
+                        ...profileData,
                         is_deleted: false,
                         is_active: true,
                         kyc_status: 'PENDING',
@@ -124,9 +168,7 @@ class adminStaffService {
                 row = await prisma.staff.create({
                     data: {
                         phone_number,
-                        name: nameRaw.trim(),
-                        gender,
-                        role_title,
+                        ...profileData,
                         kyc_status: 'PENDING',
                     },
                     select: publicStaffSelect,
@@ -152,7 +194,28 @@ class adminStaffService {
             }
 
             const data: Prisma.StaffUpdateInput = {};
-            if ('name' in body) {
+            const hasFirst = 'first_name' in body;
+            const hasLast = 'last_name' in body;
+            if (hasFirst || hasLast) {
+                const first_name =
+                    hasFirst && typeof body.first_name === 'string' && body.first_name.trim()
+                        ? body.first_name.trim()
+                        : (existing.first_name ?? '');
+                const last_name =
+                    hasLast && typeof body.last_name === 'string' && body.last_name.trim()
+                        ? body.last_name.trim()
+                        : (existing.last_name ?? '');
+                if (!first_name || !last_name) {
+                    return {
+                        success: false as const,
+                        message: 'first_name and last_name cannot be empty.',
+                        code: 'VALIDATION' as const,
+                    };
+                }
+                data.first_name = first_name;
+                data.last_name = last_name;
+                data.name = staffDisplayName(first_name, last_name);
+            } else if ('name' in body) {
                 if (typeof body.name !== 'string' || !body.name.trim()) {
                     return { success: false as const, message: 'name cannot be empty.', code: 'VALIDATION' as const };
                 }
@@ -165,6 +228,26 @@ class adminStaffService {
             if ('role_title' in body) {
                 data.role_title =
                     typeof body.role_title === 'string' && body.role_title.trim() ? body.role_title.trim() : null;
+            }
+            if ('expertise' in body) {
+                data.expertise =
+                    typeof body.expertise === 'string' && body.expertise.trim() ? body.expertise.trim() : null;
+                if (typeof body.expertise === 'string' && body.expertise.trim() && !('role_title' in body)) {
+                    data.role_title = body.expertise.trim();
+                }
+            }
+            if ('work_city' in body) {
+                data.work_city =
+                    typeof body.work_city === 'string' && body.work_city.trim() ? body.work_city.trim() : null;
+            }
+            if ('years_experience' in body) {
+                const y = body.years_experience;
+                data.years_experience =
+                    y === null || y === '' || y === undefined
+                        ? null
+                        : Number.isFinite(Number(y))
+                          ? Math.floor(Number(y))
+                          : null;
             }
             if ('is_active' in body && typeof body.is_active === 'boolean') {
                 data.is_active = body.is_active;
