@@ -1,6 +1,6 @@
 import type express from 'express';
 import multer from 'multer';
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { PutObjectCommand, S3Client, type ObjectCannedACL } from '@aws-sdk/client-s3';
 import { sendError } from '../utils/sendResponse';
 
 const DEFAULT_BUCKET_NAME = 'homezy-526123657630-eu-north-1-an';
@@ -41,6 +41,13 @@ function buildS3ObjectKey(prefix: string, originalName: string): string {
     return `${safePrefix}/${Date.now()}-${safeName}`;
 }
 
+/** When set (default public-read), new objects get this ACL so direct HTTPS URLs work in apps. */
+function resolveObjectAcl(): ObjectCannedACL | undefined {
+    const raw = (process.env.AWS_S3_OBJECT_ACL || 'public-read').trim().toLowerCase();
+    if (!raw || raw === 'none' || raw === 'private') return undefined;
+    return raw as ObjectCannedACL;
+}
+
 export const parseSingleUpload = (fieldName = 'file') => upload.single(fieldName);
 
 export const uploadSingleFileToS3 = (prefix = 'uploads', bucket = process.env.AWS_S3_BUCKET || DEFAULT_BUCKET_NAME) => {
@@ -53,6 +60,7 @@ export const uploadSingleFileToS3 = (prefix = 'uploads', bucket = process.env.AW
             const region = process.env.AWS_REGION || 'eu-north-1';
             const key = buildS3ObjectKey(prefix, req.file.originalname);
             const client = getS3Client();
+            const acl = resolveObjectAcl();
 
             await client.send(
                 new PutObjectCommand({
@@ -60,6 +68,7 @@ export const uploadSingleFileToS3 = (prefix = 'uploads', bucket = process.env.AW
                     Key: key,
                     Body: req.file.buffer,
                     ContentType: req.file.mimetype,
+                    ...(acl ? { ACL: acl } : {}),
                 }),
             );
 
