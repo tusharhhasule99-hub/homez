@@ -1,16 +1,24 @@
 import { BookingStatus } from '../../../generated/prisma/enums';
 import { prisma } from '../../../utils/prisma';
 
+export type AnalyticsRange = 'today' | '7d' | '30d';
+
 function startOfDay(d: Date): Date {
     const x = new Date(d);
     x.setHours(0, 0, 0, 0);
     return x;
 }
 
-function daysAgo(n: number): Date {
+function rangeStart(range: AnalyticsRange): { since: Date; days: number } {
+    if (range === 'today') return { since: startOfDay(new Date()), days: 1 };
+    if (range === '7d') {
+        const d = new Date();
+        d.setDate(d.getDate() - 6);
+        return { since: startOfDay(d), days: 7 };
+    }
     const d = new Date();
-    d.setDate(d.getDate() - n);
-    return startOfDay(d);
+    d.setDate(d.getDate() - 29);
+    return { since: startOfDay(d), days: 30 };
 }
 
 function toNum(v: unknown): number {
@@ -19,10 +27,9 @@ function toNum(v: unknown): number {
 }
 
 class adminAnalyticsService {
-    overview = async () => {
+    overview = async (range: AnalyticsRange = '30d') => {
         try {
-            const since14 = daysAgo(13);
-            const since30 = daysAgo(29);
+            const { since, days } = rangeStart(range);
 
             const [
                 usersTotal,
@@ -32,12 +39,13 @@ class adminAnalyticsService {
                 servicesActive,
                 addressesTotal,
                 bookingsTotal,
+                bookingsInRange,
                 bookingsOpen,
-                bookingsCompleted,
-                revenueAgg,
-                revenue30Agg,
+                bookingsCompletedInRange,
+                revenueAllAgg,
+                revenueRangeAgg,
                 statusGroups,
-                recentBookings,
+                rangeBookings,
                 topServicesRaw,
             ] = await Promise.all([
                 prisma.users.count({ where: { is_deleted: false } }),
@@ -47,6 +55,7 @@ class adminAnalyticsService {
                 prisma.service.count({ where: { is_deleted: false, is_active: true } }),
                 prisma.address.count(),
                 prisma.booking.count(),
+                prisma.booking.count({ where: { created_at: { gte: since } } }),
                 prisma.booking.count({
                     where: {
                         status: {
@@ -61,28 +70,32 @@ class adminAnalyticsService {
                         },
                     },
                 }),
-                prisma.booking.count({ where: { status: BookingStatus.COMPLETED } }),
+                prisma.booking.count({
+                    where: { status: BookingStatus.COMPLETED, created_at: { gte: since } },
+                }),
                 prisma.booking.aggregate({
                     where: { status: { notIn: [BookingStatus.CANCELLED, BookingStatus.REJECTED] } },
                     _sum: { total_amount: true },
                 }),
                 prisma.booking.aggregate({
                     where: {
-                        created_at: { gte: since30 },
+                        created_at: { gte: since },
                         status: { notIn: [BookingStatus.CANCELLED, BookingStatus.REJECTED] },
                     },
                     _sum: { total_amount: true },
                 }),
                 prisma.booking.groupBy({
                     by: ['status'],
+                    where: { created_at: { gte: since } },
                     _count: { _all: true },
                 }),
                 prisma.booking.findMany({
-                    where: { created_at: { gte: since14 } },
+                    where: { created_at: { gte: since } },
                     select: { created_at: true, total_amount: true, status: true },
                 }),
                 prisma.booking.groupBy({
                     by: ['service_id'],
+                    where: { created_at: { gte: since } },
                     _count: { _all: true },
                     _sum: { total_amount: true },
                     orderBy: { _count: { service_id: 'desc' } },
@@ -97,7 +110,9 @@ class adminAnalyticsService {
                       select: { id: true, title: true },
                   })
                 : [];
-            const titleById = new Map(serviceRows.map((s: { id: string; title: string }) => [s.id, s.title]));
+            const titleById = new Map(
+                serviceRows.map((s: { id: string; title: string }) => [s.id, s.title]),
+            );
 
             const byStatus: Record<string, number> = {};
             for (const g of statusGroups) {
@@ -105,13 +120,14 @@ class adminAnalyticsService {
             }
 
             const dayKeys: string[] = [];
-            for (let i = 13; i >= 0; i--) {
-                const d = daysAgo(i);
-                dayKeys.push(d.toISOString().slice(0, 10));
+            for (let i = days - 1; i >= 0; i--) {
+                const d = new Date();
+                d.setDate(d.getDate() - i);
+                dayKeys.push(startOfDay(d).toISOString().slice(0, 10));
             }
             const bookingsByDay = dayKeys.map((date) => ({ date, count: 0, revenue: 0 }));
             const dayIndex = new Map(dayKeys.map((k, i) => [k, i]));
-            for (const b of recentBookings) {
+            for (const b of rangeBookings) {
                 const key = startOfDay(b.created_at).toISOString().slice(0, 10);
                 const idx = dayIndex.get(key);
                 if (idx == null) continue;
@@ -125,6 +141,7 @@ class adminAnalyticsService {
                 success: true as const,
                 message: 'OK',
                 data: {
+                    range,
                     totals: {
                         users: usersTotal,
                         users_active: usersActive,
@@ -133,12 +150,16 @@ class adminAnalyticsService {
                         services_active: servicesActive,
                         addresses: addressesTotal,
                         bookings: bookingsTotal,
+                        bookings_in_range: bookingsInRange,
                         bookings_open: bookingsOpen,
-                        bookings_completed: bookingsCompleted,
-                        revenue_total: toNum(revenueAgg._sum.total_amount),
-                        revenue_last_30_days: toNum(revenue30Agg._sum.total_amount),
+                        bookings_completed: bookingsCompletedInRange,
+                        revenue_total: toNum(revenueAllAgg._sum.total_amount),
+                        revenue_in_range: toNum(revenueRangeAgg._sum.total_amount),
+                        // Back-compat aliases used by older CMS builds
+                        revenue_last_30_days: toNum(revenueRangeAgg._sum.total_amount),
                     },
                     bookings_by_status: byStatus,
+                    bookings_trend: bookingsByDay,
                     bookings_last_14_days: bookingsByDay,
                     top_services: topServicesRaw.map(
                         (r: {

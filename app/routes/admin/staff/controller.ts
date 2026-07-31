@@ -1,6 +1,7 @@
 import express from 'express';
 import { sendError, sendSuccess } from '../../../utils/sendResponse';
 import { parsePagination } from '../../../utils/pagination';
+import { writeAuditLog } from '../../../utils/auditLog';
 import adminStaffService from './service';
 
 function parseKycIncomplete(req: express.Request): boolean {
@@ -115,6 +116,16 @@ class adminStaffController {
                 const status = result.code === 'STAFF_NOT_FOUND' ? 404 : 500;
                 return sendError(res, status, result.message, result.code);
             }
+
+            await writeAuditLog({
+                adminId: req.adminAuth?.sub,
+                adminEmail: req.adminAuth?.email,
+                action: decision === 'approve' ? 'STAFF_KYC_APPROVE' : 'STAFF_KYC_REJECT',
+                entityType: 'staff',
+                entityId: result.data.id,
+                summary: `Staff KYC ${decision}d for ${result.data.name}`,
+                meta: { decision, phone: result.data.phone_number },
+            });
 
             return sendSuccess(res, 200, result.message, result.data);
         } catch (error) {

@@ -2,6 +2,7 @@ import type { Prisma } from '../../../generated/prisma/client';
 import { BookingStatus } from '../../../generated/prisma/enums';
 import { prisma } from '../../../utils/prisma';
 import { paginateResult } from '../../../utils/pagination';
+import { writeAuditLog } from '../../../utils/auditLog';
 
 const ALL_STATUSES: BookingStatus[] = [
     BookingStatus.CREATED,
@@ -34,6 +35,19 @@ const adminBookingInclude = {
     slot: { select: { id: true, duration_label: true, slot_type: true } },
     address: { select: { id: true, label: true, line1: true, area: true, city: true, pincode: true } },
     user: { select: { id: true, name: true, phone_number: true } },
+    staff: { select: { id: true, name: true, phone_number: true } },
+    payment: {
+        select: {
+            id: true,
+            status: true,
+            amount: true,
+            currency: true,
+            method: true,
+            failure_reason: true,
+            paid_at: true,
+            razorpay_payment_id: true,
+        },
+    },
 } as const;
 
 type BookingRow = Prisma.BookingGetPayload<{ include: typeof adminBookingInclude }>;
@@ -47,7 +61,20 @@ export type AdminBooking = {
     total_amount: number;
     applied_coupon_code: string | null;
     payment_method: string | null;
+    staff_id: string | null;
     staff_name: string | null;
+    staff: { id: string; name: string; phone_number: string } | null;
+    payment: {
+        id: string;
+        status: string;
+        amount: number;
+        currency: string;
+        method: string | null;
+        failure_reason: string | null;
+        paid_at: string | null;
+        razorpay_payment_id: string | null;
+    } | null;
+    payment_status: string;
     scheduled_at: string | null;
     rating: number | null;
     rating_comment: string | null;
@@ -66,6 +93,19 @@ function toNum(d: unknown): number {
 }
 
 function mapBooking(row: BookingRow): AdminBooking {
+    const payment = row.payment
+        ? {
+              id: row.payment.id,
+              status: row.payment.status,
+              amount: toNum(row.payment.amount),
+              currency: row.payment.currency,
+              method: row.payment.method,
+              failure_reason: row.payment.failure_reason,
+              paid_at: row.payment.paid_at?.toISOString() ?? null,
+              razorpay_payment_id: row.payment.razorpay_payment_id,
+          }
+        : null;
+
     return {
         id: row.id,
         status: row.status,
@@ -75,7 +115,13 @@ function mapBooking(row: BookingRow): AdminBooking {
         total_amount: toNum(row.total_amount),
         applied_coupon_code: row.applied_coupon_code,
         payment_method: row.payment_method,
-        staff_name: row.staff_name,
+        staff_id: row.staff_id,
+        staff_name: row.staff?.name ?? row.staff_name,
+        staff: row.staff
+            ? { id: row.staff.id, name: row.staff.name, phone_number: row.staff.phone_number }
+            : null,
+        payment,
+        payment_status: payment?.status ?? 'NONE',
         scheduled_at: row.scheduled_at?.toISOString() ?? null,
         rating: row.rating,
         rating_comment: row.rating_comment,
@@ -166,7 +212,16 @@ class adminBookingsService {
         }
     };
 
-    updateStatus = async (id: string, statusRaw: unknown, staffName?: unknown) => {
+    updateStatus = async (
+        id: string,
+        statusRaw: unknown,
+        opts: {
+            staffName?: unknown;
+            staffId?: unknown;
+            adminId?: string | null;
+            adminEmail?: string | null;
+        } = {},
+    ) => {
         try {
             if (typeof statusRaw !== 'string' || !statusRaw.trim()) {
                 return { success: false as const, message: 'status is required.', code: 'VALIDATION' as const };
@@ -201,12 +256,40 @@ class adminBookingsService {
             }
 
             const data: Prisma.BookingUpdateInput = { status: target };
-            if (typeof staffName === 'string' && staffName.trim()) {
-                data.staff_name = staffName.trim();
+
+            const staffIdRaw = opts.staffId;
+            if (typeof staffIdRaw === 'string' && staffIdRaw.trim()) {
+                const staff = await prisma.staff.findFirst({
+                    where: { id: staffIdRaw.trim(), is_deleted: false, is_active: true },
+                    select: { id: true, name: true },
+                });
+                if (!staff) {
+                    return { success: false as const, message: 'Staff not found.', code: 'VALIDATION' as const };
+                }
+                data.staff = { connect: { id: staff.id } };
+                data.staff_name = staff.name;
+            } else if (typeof opts.staffName === 'string' && opts.staffName.trim()) {
+                data.staff_name = opts.staffName.trim();
             }
 
             await prisma.booking.update({ where: { id }, data });
             const row = await prisma.booking.findFirstOrThrow({ where: { id }, include: adminBookingInclude });
+
+            await writeAuditLog({
+                adminId: opts.adminId,
+                adminEmail: opts.adminEmail,
+                action: 'BOOKING_STATUS_UPDATE',
+                entityType: 'booking',
+                entityId: id,
+                summary: `Booking status ${existing.status} → ${target}`,
+                meta: {
+                    from: existing.status,
+                    to: target,
+                    staff_id: row.staff_id,
+                    staff_name: row.staff_name,
+                },
+            });
+
             return { success: true as const, message: 'Booking updated.', data: mapBooking(row) };
         } catch (e) {
             console.error('[admin bookings] updateStatus', e);

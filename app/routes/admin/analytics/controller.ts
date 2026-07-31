@@ -1,13 +1,20 @@
 import express from 'express';
 import { sendError, sendSuccess } from '../../../utils/sendResponse';
-import adminAnalyticsService from './service';
+import adminAnalyticsService, { type AnalyticsRange } from './service';
+
+function parseRange(raw: unknown): AnalyticsRange {
+    const s = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+    if (s === 'today' || s === '7d' || s === '30d') return s;
+    return '30d';
+}
 
 class adminAnalyticsController {
     private service = new adminAnalyticsService();
 
-    overview = async (_req: express.Request, res: express.Response) => {
+    overview = async (req: express.Request, res: express.Response) => {
         try {
-            const result = await this.service.overview();
+            const range = parseRange(req.query.range);
+            const result = await this.service.overview(range);
             if (!result.success) {
                 return sendError(res, 500, result.message, result.code);
             }

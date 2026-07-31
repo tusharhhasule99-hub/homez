@@ -61,7 +61,12 @@ class adminBookingsController {
             if (!id) return sendError(res, 400, 'id is required', 'VALIDATION');
 
             const body = req.body ?? {};
-            const result = await this.service.updateStatus(id, body.status, body.staff_name);
+            const result = await this.service.updateStatus(id, body.status, {
+                staffName: body.staff_name,
+                staffId: body.staff_id,
+                adminId: req.adminAuth?.sub ?? null,
+                adminEmail: req.adminAuth?.email ?? null,
+            });
             if (!result.success) {
                 let status = 400;
                 if (result.code === 'NOT_FOUND') status = 404;

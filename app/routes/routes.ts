@@ -17,6 +17,8 @@ import adminServicesRoutes from './admin/services/route';
 import adminLocationsRoutes from './admin/locations/route';
 import adminAnalyticsRoutes from './admin/analytics/route';
 import adminDiscountsRoutes from './admin/discounts/route';
+import adminExportsRoutes from './admin/exports/route';
+import adminAuditRoutes from './admin/audit/route';
 
 const router = express.Router();
 
@@ -28,6 +30,8 @@ router.use('/admin/services', authenticateAdminJwt, adminServicesRoutes);
 router.use('/admin/locations', authenticateAdminJwt, adminLocationsRoutes);
 router.use('/admin/analytics', authenticateAdminJwt, adminAnalyticsRoutes);
 router.use('/admin/discounts', authenticateAdminJwt, adminDiscountsRoutes);
+router.use('/admin/exports', authenticateAdminJwt, adminExportsRoutes);
+router.use('/admin/audit', authenticateAdminJwt, adminAuditRoutes);
 router.use('/auth', authRoutes);
 router.use('/addresses', authenticateJwt, addressRoutes);
 router.use('/bookings', authenticateJwt, bookingRoutes);

@@ -1,6 +1,7 @@
 import express from 'express';
 import { sendError, sendSuccess } from '../../../utils/sendResponse';
 import { parsePagination } from '../../../utils/pagination';
+import { writeAuditLog } from '../../../utils/auditLog';
 import adminDiscountsService from './service';
 
 class adminDiscountsController {
@@ -34,6 +35,19 @@ class adminDiscountsController {
         }
     };
 
+    usage = async (_req: express.Request, res: express.Response) => {
+        try {
+            const result = await this.service.usageStats();
+            if (!result.success) {
+                return sendError(res, 500, result.message, result.code);
+            }
+            return sendSuccess(res, 200, result.message, result.data);
+        } catch (e) {
+            console.error('[admin discounts controller] usage', e);
+            return sendError(res, 500, 'Internal server error', 'INTERNAL_SERVER_ERROR');
+        }
+    };
+
     getById = async (req: express.Request, res: express.Response) => {
         try {
             const id = typeof req.params.id === 'string' ? req.params.id : req.params.id?.[0];
@@ -63,6 +77,15 @@ class adminDiscountsController {
                 else if (result.code === 'INTERNAL_SERVER_ERROR') status = 500;
                 return sendError(res, status, result.message, result.code);
             }
+            await writeAuditLog({
+                adminId: req.adminAuth?.sub,
+                adminEmail: req.adminAuth?.email,
+                action: 'DISCOUNT_CREATE',
+                entityType: 'discount',
+                entityId: result.data.id,
+                summary: `Created coupon ${result.data.code}`,
+                meta: { code: result.data.code, title: result.data.title },
+            });
             return sendSuccess(res, 201, result.message, result.data);
         } catch (e) {
             console.error('[admin discounts controller] create', e);
@@ -86,6 +109,15 @@ class adminDiscountsController {
                 else if (result.code === 'INTERNAL_SERVER_ERROR') status = 500;
                 return sendError(res, status, result.message, result.code);
             }
+            await writeAuditLog({
+                adminId: req.adminAuth?.sub,
+                adminEmail: req.adminAuth?.email,
+                action: 'DISCOUNT_UPDATE',
+                entityType: 'discount',
+                entityId: result.data.id,
+                summary: `Updated coupon ${result.data.code}`,
+                meta: { code: result.data.code },
+            });
             return sendSuccess(res, 200, result.message, result.data);
         } catch (e) {
             console.error('[admin discounts controller] update', e);
@@ -102,6 +134,15 @@ class adminDiscountsController {
                 const status = result.code === 'NOT_FOUND' ? 404 : 500;
                 return sendError(res, status, result.message, result.code);
             }
+            await writeAuditLog({
+                adminId: req.adminAuth?.sub,
+                adminEmail: req.adminAuth?.email,
+                action: 'DISCOUNT_DELETE',
+                entityType: 'discount',
+                entityId: result.data.id,
+                summary: `Deleted coupon ${result.data.code}`,
+                meta: { code: result.data.code },
+            });
             return sendSuccess(res, 200, result.message, result.data);
         } catch (e) {
             console.error('[admin discounts controller] delete', e);

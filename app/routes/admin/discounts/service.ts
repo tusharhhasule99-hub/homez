@@ -354,6 +354,44 @@ class adminDiscountsService {
             };
         }
     };
+
+    usageStats = async () => {
+        try {
+            const rows = await prisma.discount.findMany({
+                where: { is_deleted: false },
+                orderBy: { usage_count: 'desc' },
+                take: 20,
+                select: {
+                    id: true,
+                    code: true,
+                    title: true,
+                    usage_count: true,
+                    usage_limit_total: true,
+                    is_active: true,
+                    expires_at: true,
+                },
+            });
+            const data = rows.map((r) => ({
+                id: r.id,
+                code: r.code,
+                title: r.title,
+                usage_count: r.usage_count,
+                usage_limit_total: r.usage_limit_total,
+                uses_remaining:
+                    r.usage_limit_total == null ? null : Math.max(0, r.usage_limit_total - r.usage_count),
+                is_active: r.is_active,
+                expires_at: r.expires_at.toISOString(),
+            }));
+            return { success: true as const, message: 'OK', data };
+        } catch (e) {
+            console.error('[admin discounts] usageStats', e);
+            return {
+                success: false as const,
+                message: 'Internal server error.',
+                code: 'INTERNAL_SERVER_ERROR' as const,
+            };
+        }
+    };
 }
 
 export default adminDiscountsService;

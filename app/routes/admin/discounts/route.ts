@@ -5,6 +5,7 @@ const router = express.Router();
 const controller = new adminDiscountsController();
 
 router.get('/', controller.list);
+router.get('/usage', controller.usage);
 router.post('/', controller.create);
 router.get('/:id', controller.getById);
 router.patch('/:id', controller.update);
