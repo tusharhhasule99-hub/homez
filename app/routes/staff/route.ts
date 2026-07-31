@@ -10,6 +10,8 @@ const controller = new staffController();
 router.post('/login', controller.login);
 router.post('/resend-otp', controller.resendOtp);
 router.post('/verify-otp', controller.verifyOtp);
+router.get('/me', authenticateStaffJwt, controller.getMe);
+router.post('/onboarding', authenticateStaffJwt, controller.onboarding);
 router.post('/upload', authenticateStaffJwt, parseSingleUpload('file'), uploadSingleFileToS3('staff'), controller.upload);
 
 router.post('/location', authenticateStaffJwt, controller.updateLocation);

@@ -8,6 +8,8 @@ export const publicStaffSelect = {
     is_photo_verified: true,
     is_docs_verified: true,
     kyc_status: true,
+    is_onboarding_completed: true,
+    onboarding_step: true,
     profile_photo_url: true,
     docs: true,
     latitude: true,
@@ -28,6 +30,8 @@ export type PublicStaff = {
     is_photo_verified: boolean;
     is_docs_verified: boolean;
     kyc_status: 'PENDING' | 'VERIFIED' | 'REJECTED';
+    is_onboarding_completed: boolean;
+    onboarding_step: number;
     profile_photo_url: string | null;
     docs: unknown;
     latitude: number | null;

@@ -445,8 +445,8 @@
         "tags": [
           "Staff"
         ],
-        "summary": "Staff login or register with phone (combined)",
-        "description": "Combined register + login. Existing staff: send `phone_number` only to receive OTP. New staff: also send `name` (required) plus optional profile fields to create the account, then receive OTP. Optional profile fields on an existing account update the profile before OTP is sent. Use `/staff/verify-otp` to get a token.",
+        "summary": "Staff OTP login",
+        "description": "Phone-only OTP login. Sends OTP for the given phone. If no staff exists yet, creates one automatically (default display name) then sends OTP. Optional profile fields (`name`, `gender`, etc.) update the profile when provided. Use `/staff/verify-otp` to get a token. Dev OTP is `123456` when `NODE_ENV` is not production.",
         "security": [],
         "requestBody": {
           "required": true,
@@ -456,30 +456,19 @@
                 "$ref": "#/components/schemas/StaffLoginBody"
               },
               "examples": {
-                "existing_login": {
-                  "summary": "Existing staff — phone only",
+                "login": {
+                  "summary": "Phone only (OTP login)",
                   "value": {
-                    "phone_number": "+919876543210"
+                    "phone_number": "+918433795799"
                   }
                 },
-                "new_registration": {
-                  "summary": "New staff — register + OTP",
+                "login_with_profile": {
+                  "summary": "Optional profile fields",
                   "value": {
                     "name": "Ravi Kumar",
                     "phone_number": "+919876543210",
                     "gender": "male",
-                    "role_title": "Electrician",
-                    "profile_photo_url": "https://cdn.example.com/staff/ravi.jpg",
-                    "docs": [
-                      {
-                        "type": "aadhaar",
-                        "url": "https://cdn.example.com/docs/aadhaar.jpg"
-                      },
-                      {
-                        "type": "pan",
-                        "url": "https://cdn.example.com/docs/pan.jpg"
-                      }
-                    ]
+                    "role_title": "Electrician"
                   }
                 }
               }
@@ -498,7 +487,7 @@
             }
           },
           "400": {
-            "description": "Validation error (e.g. missing name for new staff)",
+            "description": "Validation error (missing phone)",
             "content": {
               "application/json": {
                 "schema": {
@@ -625,6 +614,7 @@
           "Staff"
         ],
         "summary": "Verify staff OTP and get token",
+        "description": "Verify OTP after login/resend. Returns JWT plus `is_onboarding_completed` and `onboarding_step` for app routing (same pattern as customer verify).",
         "security": [],
         "requestBody": {
           "required": true,
@@ -683,6 +673,138 @@
           },
           "503": {
             "description": "Server misconfiguration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/staff/me": {
+      "get": {
+        "tags": [
+          "Staff"
+        ],
+        "summary": "Current staff profile (boot routing)",
+        "description": "Requires staff JWT. Returns staff profile plus onboarding flags for app boot.",
+        "security": [
+          {
+            "staffBearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessStaffMe"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/staff/onboarding": {
+      "post": {
+        "tags": [
+          "Staff"
+        ],
+        "summary": "Submit staff onboarding step",
+        "description": "**Step 1:** `name`, `profile_photo_url`, `gender` (male|female|other), optional `role_title`. Upload photo via `POST /staff/upload?use_case=profile` first. **Step 2:** `docs` array (upload via `POST /staff/upload?use_case=media`). Completing step 2 sets `is_onboarding_completed=true`. Requires verified staff JWT.",
+        "security": [
+          {
+            "staffBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StaffOnboardingBody"
+              },
+              "examples": {
+                "step1": {
+                  "summary": "Profile + photo",
+                  "value": {
+                    "step": 1,
+                    "name": "Ravi Kumar",
+                    "gender": "male",
+                    "role_title": "Electrician",
+                    "profile_photo_url": "https://cdn.example.com/staff/ravi.jpg"
+                  }
+                },
+                "step2": {
+                  "summary": "Documents",
+                  "value": {
+                    "step": 2,
+                    "docs": [
+                      {
+                        "type": "aadhaar",
+                        "url": "https://cdn.example.com/docs/aadhaar.jpg",
+                        "name": "aadhaar.jpg"
+                      },
+                      {
+                        "type": "pan",
+                        "url": "https://cdn.example.com/docs/pan.jpg",
+                        "name": "pan.jpg"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Step saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessStaffMe"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Phone not verified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Wrong step order or onboarding already finished",
             "content": {
               "application/json": {
                 "schema": {
@@ -2962,7 +3084,7 @@
           },
           "name": {
             "type": "string",
-            "description": "Required when registering a new staff phone number.",
+            "description": "Optional. Updates display name when provided; not required for OTP login.",
             "example": "Ravi Kumar"
           },
           "gender": {
@@ -3028,6 +3150,14 @@
               "REJECTED"
             ]
           },
+          "is_onboarding_completed": {
+            "type": "boolean",
+            "description": "If false, show onboarding; use onboarding_step for which screen."
+          },
+          "onboarding_step": {
+            "type": "integer",
+            "description": "1 = profile + photo; 2 = documents."
+          },
           "profile_photo_url": {
             "type": "string",
             "format": "uri",
@@ -3085,12 +3215,26 @@
       },
       "StaffVerifyData": {
         "type": "object",
+        "required": [
+          "token",
+          "staff",
+          "is_onboarding_completed",
+          "onboarding_step"
+        ],
         "properties": {
           "token": {
             "type": "string"
           },
           "staff": {
             "$ref": "#/components/schemas/PublicStaff"
+          },
+          "is_onboarding_completed": {
+            "type": "boolean",
+            "description": "If false, open onboarding; otherwise home."
+          },
+          "onboarding_step": {
+            "type": "integer",
+            "description": "1 = profile + photo; 2 = documents."
           }
         }
       },
@@ -3106,6 +3250,86 @@
           },
           "data": {
             "$ref": "#/components/schemas/StaffVerifyData"
+          }
+        }
+      },
+      "StaffOnboardingBody": {
+        "type": "object",
+        "required": [
+          "step"
+        ],
+        "properties": {
+          "step": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "Required for step 1"
+          },
+          "gender": {
+            "type": "string",
+            "enum": [
+              "male",
+              "female",
+              "other"
+            ],
+            "description": "Required for step 1"
+          },
+          "role_title": {
+            "type": "string",
+            "nullable": true,
+            "description": "Optional extra for step 1"
+          },
+          "profile_photo_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Required for step 1 (upload via use_case=profile first)"
+          },
+          "docs": {
+            "type": "array",
+            "description": "Required for step 2 (non-empty). Upload files via use_case=media first.",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
+      },
+      "StaffMeData": {
+        "type": "object",
+        "required": [
+          "staff",
+          "is_onboarding_completed",
+          "onboarding_step"
+        ],
+        "properties": {
+          "staff": {
+            "$ref": "#/components/schemas/PublicStaff"
+          },
+          "is_onboarding_completed": {
+            "type": "boolean"
+          },
+          "onboarding_step": {
+            "type": "integer"
+          }
+        }
+      },
+      "SuccessStaffMe": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "message": {
+            "type": "string"
+          },
+          "data": {
+            "$ref": "#/components/schemas/StaffMeData"
           }
         }
       },

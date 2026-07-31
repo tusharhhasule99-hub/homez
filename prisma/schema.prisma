@@ -60,6 +60,11 @@ model Staff {
   is_docs_verified   Boolean @default(false)
   kyc_status         StaffKycStatus @default(PENDING)
 
+  /// App routing after OTP verify (same pattern as Users).
+  is_onboarding_completed Boolean @default(false)
+  /// 1 = profile (name + photo + extras); 2 = docs; then completed.
+  onboarding_step         Int     @default(1)
+
   profile_photo_url String?
   docs              Json     @default("[]")
 

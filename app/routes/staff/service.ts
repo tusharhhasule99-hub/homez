@@ -188,10 +188,8 @@ class staffService {
     };
 
     /**
-     * Combined register + login.
-     * - Existing staff: phone_number only → send OTP.
-     * - New staff: phone_number + name (optional profile fields) → create, then send OTP.
-     * - Existing staff with profile fields: updates profile, then sends OTP.
+     * OTP login (phone only). Creates staff on first login if missing.
+     * Optional profile fields (name, gender, …) update the record when sent.
      */
     login = async (body: Record<string, unknown>) => {
         try {
@@ -221,18 +219,12 @@ class staffService {
             let staff = await prisma.staff.findUnique({ where: { phone_number } });
 
             if (!staff) {
-                if (!hasName) {
-                    return {
-                        success: false as const,
-                        message: 'name is required for new staff registration.',
-                        code: 'VALIDATION' as const,
-                    };
-                }
-
+                // Phone-only OTP login — same pattern as customer auth. Name can be filled later.
+                const defaultName = hasName ? (nameRaw as string).trim() : `Staff ${phone_number.slice(-4)}`;
                 staff = await prisma.staff.create({
                     data: {
                         phone_number,
-                        name: (nameRaw as string).trim(),
+                        name: defaultName,
                         gender: hasGender ? (genderRaw as string).trim().toLowerCase() : null,
                         role_title: hasRoleTitle ? (roleTitleRaw as string).trim() : null,
                         profile_photo_url: hasPhoto ? (photoUrlRaw as string).trim() : null,
@@ -257,7 +249,6 @@ class staffService {
                             ...(hasRoleTitle ? { role_title: (roleTitleRaw as string).trim() } : {}),
                             ...(hasPhoto ? { profile_photo_url: (photoUrlRaw as string).trim() } : {}),
                             ...(hasDocs ? { docs: docsRaw } : {}),
-                            // Profile changes reset verification pending admin review.
                             ...(hasPhoto || hasDocs
                                 ? {
                                       is_photo_verified: hasPhoto ? false : undefined,
@@ -383,10 +374,12 @@ class staffService {
 
             return {
                 success: true as const,
-                message: 'Phone verified successfully.',
+                message: 'Verified.',
                 data: {
                     token,
                     staff: updated,
+                    is_onboarding_completed: updated.is_onboarding_completed,
+                    onboarding_step: updated.onboarding_step,
                 },
             };
         } catch (error) {
@@ -398,6 +391,202 @@ class staffService {
                 };
             }
             console.error('Error in staff verifyOtp', error);
+            return {
+                success: false as const,
+                message: 'Internal server error. Please try again later.',
+                code: 'INTERNAL_SERVER_ERROR' as const,
+            };
+        }
+    };
+
+    getMe = async (staffId: string) => {
+        try {
+            const staff = await prisma.staff.findFirst({
+                where: { id: staffId, is_active: true, is_deleted: false },
+                select: publicStaffSelect,
+            });
+            if (!staff) {
+                return { success: false as const, message: 'Staff not found.', code: 'STAFF_NOT_FOUND' as const };
+            }
+            return {
+                success: true as const,
+                message: 'OK',
+                data: {
+                    staff,
+                    is_onboarding_completed: staff.is_onboarding_completed,
+                    onboarding_step: staff.onboarding_step,
+                },
+            };
+        } catch (error) {
+            console.error('Error in staff getMe', error);
+            return {
+                success: false as const,
+                message: 'Internal server error. Please try again later.',
+                code: 'INTERNAL_SERVER_ERROR' as const,
+            };
+        }
+    };
+
+    /**
+     * Staff onboarding (JWT required).
+     * Step 1 — name, profile_photo_url, gender, optional role_title (+ extras)
+     * Step 2 — docs (upload via POST /staff/upload?use_case=media, then pass metadata)
+     */
+    submitOnboardingStep = async (staffId: string, body: Record<string, unknown>) => {
+        try {
+            const step = body.step;
+            if (step !== 1 && step !== 2) {
+                return {
+                    success: false as const,
+                    message: 'step must be 1 (profile + photo) or 2 (documents).',
+                    code: 'INVALID_STEP' as const,
+                };
+            }
+
+            const staff = await prisma.staff.findFirst({
+                where: { id: staffId, is_active: true, is_deleted: false },
+            });
+            if (!staff) {
+                return { success: false as const, message: 'Staff not found.', code: 'STAFF_NOT_FOUND' as const };
+            }
+            if (!staff.is_phone_verified) {
+                return {
+                    success: false as const,
+                    message: 'Verify your phone before onboarding.',
+                    code: 'NOT_VERIFIED' as const,
+                };
+            }
+            if (staff.is_onboarding_completed) {
+                return {
+                    success: false as const,
+                    message: 'Onboarding is already complete.',
+                    code: 'ONBOARDING_COMPLETE' as const,
+                };
+            }
+
+            if (step === 1) {
+                if (staff.onboarding_step !== 1) {
+                    return {
+                        success: false as const,
+                        message: 'Step 1 is already done. Continue with step 2 (documents).',
+                        code: 'INVALID_STEP_ORDER' as const,
+                    };
+                }
+
+                const nameRaw = body.name;
+                if (typeof nameRaw !== 'string' || !nameRaw.trim()) {
+                    return { success: false as const, message: 'name is required.', code: 'VALIDATION' as const };
+                }
+                const name = nameRaw.trim();
+                if (name.length > 200) {
+                    return {
+                        success: false as const,
+                        message: 'name must be at most 200 characters.',
+                        code: 'VALIDATION' as const,
+                    };
+                }
+
+                let profile_photo_url =
+                    typeof body.profile_photo_url === 'string' ? body.profile_photo_url.trim() : '';
+                if (!profile_photo_url && staff.profile_photo_url) {
+                    profile_photo_url = staff.profile_photo_url;
+                }
+                if (!profile_photo_url) {
+                    return {
+                        success: false as const,
+                        message:
+                            'profile_photo_url is required. Upload via POST /staff/upload?use_case=profile then pass the returned url.',
+                        code: 'VALIDATION' as const,
+                    };
+                }
+
+                const genderRaw = typeof body.gender === 'string' ? body.gender.trim().toLowerCase() : '';
+                if (!['male', 'female', 'other'].includes(genderRaw)) {
+                    return {
+                        success: false as const,
+                        message: 'gender must be one of: male, female, other.',
+                        code: 'VALIDATION' as const,
+                    };
+                }
+
+                const role_title =
+                    typeof body.role_title === 'string' && body.role_title.trim()
+                        ? body.role_title.trim()
+                        : null;
+
+                const updated: PublicStaff = await prisma.staff.update({
+                    where: { id: staffId },
+                    data: {
+                        name,
+                        gender: genderRaw,
+                        role_title,
+                        profile_photo_url,
+                        is_photo_verified: false,
+                        kyc_status: 'PENDING',
+                        onboarding_step: 2,
+                    },
+                    select: publicStaffSelect,
+                });
+
+                return {
+                    success: true as const,
+                    message: 'Profile saved. Continue to documents.',
+                    data: {
+                        staff: updated,
+                        is_onboarding_completed: updated.is_onboarding_completed,
+                        onboarding_step: updated.onboarding_step,
+                    },
+                };
+            }
+
+            if (staff.onboarding_step !== 2) {
+                return {
+                    success: false as const,
+                    message: 'Complete step 1 (profile + photo) first.',
+                    code: 'INVALID_STEP_ORDER' as const,
+                };
+            }
+
+            const docsRaw = body.docs;
+            const docs = Array.isArray(docsRaw) ? docsRaw : null;
+            if (!docs || docs.length === 0) {
+                // Allow completing if media was already uploaded via /staff/upload?use_case=media
+                const existingDocs = Array.isArray(staff.docs) ? staff.docs : [];
+                if (existingDocs.length === 0) {
+                    return {
+                        success: false as const,
+                        message:
+                            'docs is required (non-empty array). Upload via POST /staff/upload?use_case=media then pass doc metadata, or send docs in this body.',
+                        code: 'VALIDATION' as const,
+                    };
+                }
+            }
+
+            const nextDocs = docs && docs.length > 0 ? docs : (staff.docs as unknown[]);
+
+            const updated: PublicStaff = await prisma.staff.update({
+                where: { id: staffId },
+                data: {
+                    docs: nextDocs,
+                    is_docs_verified: false,
+                    kyc_status: 'PENDING',
+                    onboarding_step: 2,
+                    is_onboarding_completed: true,
+                },
+                select: publicStaffSelect,
+            });
+
+            return {
+                success: true as const,
+                message: 'Onboarding complete.',
+                data: {
+                    staff: updated,
+                    is_onboarding_completed: updated.is_onboarding_completed,
+                    onboarding_step: updated.onboarding_step,
+                },
+            };
+        } catch (error) {
+            console.error('Error in staff submitOnboardingStep', error);
             return {
                 success: false as const,
                 message: 'Internal server error. Please try again later.',
