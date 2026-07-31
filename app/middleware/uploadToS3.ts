@@ -41,11 +41,22 @@ function buildS3ObjectKey(prefix: string, originalName: string): string {
     return `${safePrefix}/${Date.now()}-${safeName}`;
 }
 
-/** When set (default public-read), new objects get this ACL so direct HTTPS URLs work in apps. */
+/**
+ * Optional canned ACL. Buckets with Object Ownership = "Bucket owner enforced" reject any ACL,
+ * so public reads should normally come from a bucket policy instead — hence the default of none.
+ */
 function resolveObjectAcl(): ObjectCannedACL | undefined {
-    const raw = (process.env.AWS_S3_OBJECT_ACL || 'public-read').trim().toLowerCase();
+    const raw = (process.env.AWS_S3_OBJECT_ACL || '').trim().toLowerCase();
     if (!raw || raw === 'none' || raw === 'private') return undefined;
     return raw as ObjectCannedACL;
+}
+
+function isAclUnsupportedError(error: unknown): boolean {
+    const name = (error as { name?: string; Code?: string })?.name ?? '';
+    const code = (error as { Code?: string })?.Code ?? '';
+    return [name, code].some((v) =>
+        ['AccessControlListNotSupported', 'InvalidBucketAclWithObjectOwnership'].includes(v),
+    );
 }
 
 export const parseSingleUpload = (fieldName = 'file') => upload.single(fieldName);
@@ -61,16 +72,20 @@ export const uploadSingleFileToS3 = (prefix = 'uploads', bucket = process.env.AW
             const key = buildS3ObjectKey(prefix, req.file.originalname);
             const client = getS3Client();
             const acl = resolveObjectAcl();
+            const putParams = {
+                Bucket: bucket,
+                Key: key,
+                Body: req.file.buffer,
+                ContentType: req.file.mimetype,
+            };
 
-            await client.send(
-                new PutObjectCommand({
-                    Bucket: bucket,
-                    Key: key,
-                    Body: req.file.buffer,
-                    ContentType: req.file.mimetype,
-                    ...(acl ? { ACL: acl } : {}),
-                }),
-            );
+            try {
+                await client.send(new PutObjectCommand(acl ? { ...putParams, ACL: acl } : putParams));
+            } catch (error) {
+                if (!acl || !isAclUnsupportedError(error)) throw error;
+                console.warn('S3 rejected the object ACL (ACLs disabled on bucket); retrying without ACL.');
+                await client.send(new PutObjectCommand(putParams));
+            }
 
             req.uploadedFile = {
                 bucket,
@@ -83,7 +98,9 @@ export const uploadSingleFileToS3 = (prefix = 'uploads', bucket = process.env.AW
 
             return next();
         } catch (error) {
-            console.error('S3 upload failed', error);
+            const name = (error as { name?: string })?.name;
+            const message = (error as { message?: string })?.message;
+            console.error('S3 upload failed', { name, message, error });
             return sendError(res, 500, 'File upload failed', 'UPLOAD_FAILED');
         }
     };
