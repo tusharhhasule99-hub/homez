@@ -16,6 +16,7 @@ import adminBookingsRoutes from './admin/bookings/route';
 import adminServicesRoutes from './admin/services/route';
 import adminLocationsRoutes from './admin/locations/route';
 import adminAnalyticsRoutes from './admin/analytics/route';
+import adminDiscountsRoutes from './admin/discounts/route';
 
 const router = express.Router();
 
@@ -26,6 +27,7 @@ router.use('/admin/bookings', authenticateAdminJwt, adminBookingsRoutes);
 router.use('/admin/services', authenticateAdminJwt, adminServicesRoutes);
 router.use('/admin/locations', authenticateAdminJwt, adminLocationsRoutes);
 router.use('/admin/analytics', authenticateAdminJwt, adminAnalyticsRoutes);
+router.use('/admin/discounts', authenticateAdminJwt, adminDiscountsRoutes);
 router.use('/auth', authRoutes);
 router.use('/addresses', authenticateJwt, addressRoutes);
 router.use('/bookings', authenticateJwt, bookingRoutes);
