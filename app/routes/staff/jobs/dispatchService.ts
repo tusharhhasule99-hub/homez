@@ -1,40 +1,18 @@
 /**
- * Real-time job dispatch: when a booking is created, offer it to nearby
- * available staff over SSE; the first to accept wins (atomic claim). If nobody
- * accepts within the offer window, the sweep widens the search radius and keeps
- * trying. Offers are persisted in `job_offers` for audit + first-come-first-serve.
+ * Real-time job dispatch: when a booking is created, offer it to every active
+ * KYC-verified staff member over SSE; the first to accept wins (atomic claim).
+ * Offers are persisted in `job_offers` for audit + first-come-first-serve.
  */
 
 import type { Prisma } from '../../../generated/prisma/client';
 import { BookingStatus, JobOfferStatus } from '../../../generated/prisma/enums';
 import { prisma } from '../../../utils/prisma';
-import { boundingBox, haversineKm } from '../../../utils/geo';
 import { sendToStaff } from '../../../realtime/sseRegistry';
 
 // ---- Config (read env lazily, matching the rest of the codebase) ----
 
 const OFFER_WINDOW_SEC = () => Number(process.env.DISPATCH_OFFER_WINDOW_SEC ?? 60);
-const RADIUS_TIERS_KM = () =>
-    (process.env.DISPATCH_RADIUS_TIERS ?? '1,2,5')
-        .split(',')
-        .map((s) => Number(s.trim()))
-        .filter((n) => Number.isFinite(n) && n > 0);
-const STAFF_STALE_SEC = () => Number(process.env.DISPATCH_STAFF_STALE_SEC ?? 120);
-
-function freshnessCutoff(): Date {
-    return new Date(Date.now() - STAFF_STALE_SEC() * 1000);
-}
-
-function nextRadius(current: number): number | null {
-    const tiers = RADIUS_TIERS_KM();
-    const idx = tiers.indexOf(current);
-    if (idx === -1) return tiers[0] ?? null;
-    return tiers[idx + 1] ?? null; // null = already at max tier
-}
-
 // ---- Types ----
-
-type Coords = { latitude: number; longitude: number };
 
 interface OfferPayload {
     offerId: string;
@@ -49,39 +27,25 @@ interface OfferPayload {
 
 // ---- Candidate search ----
 
-async function findNearbyStaff(
-    center: Coords,
-    radiusKm: number,
-): Promise<{ id: string; name: string; distanceKm: number }[]> {
-    const bb = boundingBox(center.latitude, center.longitude, radiusKm);
+async function findEligibleStaff(): Promise<{ id: string; name: string; distanceKm: number }[]> {
     const candidates = await prisma.staff.findMany({
         where: {
             is_active: true,
             is_deleted: false,
             kyc_status: 'VERIFIED',
-            is_available: true,
-            latitude: { gte: bb.minLat, lte: bb.maxLat },
-            longitude: { gte: bb.minLng, lte: bb.maxLng },
-            last_seen_at: { gte: freshnessCutoff() },
         },
-        select: { id: true, name: true, latitude: true, longitude: true },
+        select: { id: true, name: true },
     });
 
-    const inRange: { id: string; name: string; distanceKm: number }[] = [];
-    for (const s of candidates) {
-        if (s.latitude == null || s.longitude == null) continue;
-        const distanceKm = haversineKm(center.latitude, center.longitude, s.latitude, s.longitude);
-        if (distanceKm <= radiusKm) {
-            inRange.push({ id: s.id, name: s.name, distanceKm });
-        }
-    }
-    return inRange;
+    // Demo mode: radius, coordinates, availability and last-seen checks are
+    // intentionally disabled. Restore those filters before location-based launch.
+    return candidates.map((staff) => ({ ...staff, distanceKm: 0 }));
 }
 
 // ---- Offer emission ----
 
 /**
- * Offer a booking (already in AWAITING_STAFF) to the given staff at `radiusKm`.
+ * Offer a booking (already in AWAITING_STAFF) to every KYC-verified staff member.
  * Upserts a PENDING JobOffer per staff (skipping any who already have a live
  * offer for this booking) and pushes `job.offered` over SSE. Returns the count
  * of newly offered staff.
@@ -95,23 +59,20 @@ async function offerToStaff(
     },
     radiusKm: number,
 ): Promise<number> {
-    const nearby = await findNearbyStaff(
-        { latitude: booking.address.latitude, longitude: booking.address.longitude },
-        radiusKm,
-    );
-    if (nearby.length === 0) return 0;
+    const eligible = await findEligibleStaff();
+    if (eligible.length === 0) return 0;
 
     // Staff who already have a non-expired/-declined offer for this booking are skipped.
     const existing = await prisma.jobOffer.findMany({
         where: {
             booking_id: booking.id,
-            staff_id: { in: nearby.map((s) => s.id) },
+            staff_id: { in: eligible.map((s) => s.id) },
             status: { in: [JobOfferStatus.PENDING, JobOfferStatus.ACCEPTED] },
         },
         select: { staff_id: true },
     });
     const skip = new Set(existing.map((o) => o.staff_id));
-    const targets = nearby.filter((s) => !skip.has(s.id));
+    const targets = eligible.filter((s) => !skip.has(s.id));
     if (targets.length === 0) return 0;
 
     const expiresAt = new Date(Date.now() + OFFER_WINDOW_SEC() * 1000);
@@ -167,7 +128,7 @@ const bookingForDispatch = {
 
 /**
  * Kick off dispatch for a freshly-created booking. Transitions it to
- * AWAITING_STAFF and offers it to staff within the first radius tier.
+ * AWAITING_STAFF and offers it to every active KYC-verified staff member.
  * Fire-and-forget from the booking controller; safe to call more than once
  * (the sweep also self-heals stuck CREATED bookings).
  */
@@ -181,8 +142,7 @@ export async function dispatchBooking(bookingId: string): Promise<void> {
         return; // already progressed past dispatch
     }
 
-    const tiers = RADIUS_TIERS_KM();
-    const radiusKm = tiers[0] ?? 1;
+    const radiusKm = 0; // Demo mode: radius filtering is disabled.
 
     await prisma.booking.update({
         where: { id: bookingId },
@@ -372,8 +332,7 @@ export async function expireBookingOffers(bookingId: string): Promise<void> {
  * One sweep tick, invoked on an interval by the dispatch cron:
  *  1. Expire timed-out PENDING offers.
  *  2. Self-heal: dispatch any CREATED booking that never got its trigger.
- *  3. For each AWAITING_STAFF booking, widen the radius when the window has
- *     elapsed and re-offer (capped at the max tier, then keep waiting).
+ *  3. Re-offer AWAITING_STAFF bookings to all verified staff after each window.
  */
 export async function runSweep(): Promise<void> {
     const now = new Date();
@@ -403,7 +362,7 @@ export async function runSweep(): Promise<void> {
         await dispatchBooking(b.id).catch((e) => console.error('[dispatch] self-heal', e));
     }
 
-    // 3. Widen + re-offer for bookings still searching.
+    // 3. Re-offer to all verified staff for bookings still searching.
     const windowMs = OFFER_WINDOW_SEC() * 1000;
     const searching = await prisma.booking.findMany({
         where: { status: BookingStatus.AWAITING_STAFF },
@@ -414,14 +373,12 @@ export async function runSweep(): Promise<void> {
         const lastBatch = booking.last_offer_batch_at?.getTime() ?? 0;
         if (now.getTime() - lastBatch < windowMs) continue; // window not elapsed yet
 
-        const current = booking.current_radius_km ?? RADIUS_TIERS_KM()[0] ?? 1;
-        const widened = nextRadius(current);
-        const radiusKm = widened ?? current; // at max tier: keep retrying at max
+        const radiusKm = 0; // Demo mode: no area/radius validation.
 
         await prisma.booking.update({
             where: { id: booking.id },
             data: { current_radius_km: radiusKm, last_offer_batch_at: now },
         });
-        await offerToStaff(booking, radiusKm).catch((e) => console.error('[dispatch] widen', e));
+        await offerToStaff(booking, radiusKm).catch((e) => console.error('[dispatch] re-offer', e));
     }
 }
