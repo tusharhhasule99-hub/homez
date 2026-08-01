@@ -10,6 +10,7 @@ import discountRoutes from './discounts/route';
 import serviceRoutes from './services/route';
 import staffRoutes from './staff/route';
 import adminAuthRoutes from './admin/auth/route';
+import adminAdminsRoutes from './admin/admins/route';
 import adminUsersRoutes from './admin/users/route';
 import adminStaffRoutes from './admin/staff/route';
 import adminBookingsRoutes from './admin/bookings/route';
@@ -23,6 +24,7 @@ import adminAuditRoutes from './admin/audit/route';
 const router = express.Router();
 
 router.use('/admin/auth', adminAuthRoutes);
+router.use('/admin/admins', authenticateAdminJwt, adminAdminsRoutes);
 router.use('/admin/users', authenticateAdminJwt, adminUsersRoutes);
 router.use('/admin/staff', authenticateAdminJwt, adminStaffRoutes);
 router.use('/admin/bookings', authenticateAdminJwt, adminBookingsRoutes);
