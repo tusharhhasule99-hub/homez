@@ -3,6 +3,7 @@ import { BookingStatus } from '../../../generated/prisma/enums';
 import { prisma } from '../../../utils/prisma';
 import { paginateResult } from '../../../utils/pagination';
 import { writeAuditLog } from '../../../utils/auditLog';
+import { sendToUser } from '../../../realtime/sseRegistry';
 
 const ALL_STATUSES: BookingStatus[] = [
     BookingStatus.CREATED,
@@ -256,6 +257,8 @@ class adminBookingsService {
             }
 
             const data: Prisma.BookingUpdateInput = { status: target };
+            let assignedStaff: { id: string; name: string } | null = null;
+            let assignedStaffNameOnly: string | null = null;
 
             const staffIdRaw = opts.staffId;
             if (typeof staffIdRaw === 'string' && staffIdRaw.trim()) {
@@ -268,8 +271,10 @@ class adminBookingsService {
                 }
                 data.staff = { connect: { id: staff.id } };
                 data.staff_name = staff.name;
+                assignedStaff = staff;
             } else if (typeof opts.staffName === 'string' && opts.staffName.trim()) {
                 data.staff_name = opts.staffName.trim();
+                assignedStaffNameOnly = opts.staffName.trim();
             }
 
             await prisma.booking.update({ where: { id }, data });
@@ -289,6 +294,16 @@ class adminBookingsService {
                     staff_name: row.staff_name,
                 },
             });
+
+            if (assignedStaff || assignedStaffNameOnly) {
+                sendToUser(existing.user_id, 'booking.staff_assigned', {
+                    bookingId: id,
+                    status: target,
+                    staffId: assignedStaff?.id ?? row.staff_id,
+                    staffName: assignedStaff?.name ?? assignedStaffNameOnly ?? row.staff_name,
+                    assignedAt: new Date().toISOString(),
+                });
+            }
 
             return { success: true as const, message: 'Booking updated.', data: mapBooking(row) };
         } catch (e) {

@@ -2,6 +2,11 @@ import express from 'express';
 import { sendError, sendSuccess } from '../../utils/sendResponse';
 import bookingService from './service';
 import { dispatchBooking } from '../staff/jobs/dispatchService';
+import { addUserClient, removeUserClient, type SseClient } from '../../realtime/sseRegistry';
+import { BookingStatus } from '../../generated/prisma/enums';
+import { prisma } from '../../utils/prisma';
+
+const HEARTBEAT_MS = () => Number(process.env.SSE_HEARTBEAT_MS ?? 15000);
 
 function uid(req: express.Request): string | undefined {
     return req.auth?.sub;
@@ -18,6 +23,82 @@ class bookingController {
     constructor() {
         this.bookingService = new bookingService();
     }
+
+    /**
+     * Long-lived SSE stream. The user app holds this open to receive
+     * `booking.staff_assigned` (and related) events in real time.
+     */
+    stream = async (req: express.Request, res: express.Response) => {
+        const userId = uid(req);
+        if (!userId) {
+            return sendError(res, 401, 'Unauthorized', 'UNAUTHORIZED');
+        }
+
+        res.status(200);
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache, no-transform');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
+        res.flushHeaders();
+
+        res.write(': connected\n\n');
+
+        // Replay recently assigned bookings so a reconnecting app catches up.
+        try {
+            const recent = await prisma.booking.findMany({
+                where: {
+                    user_id: userId,
+                    staff_id: { not: null },
+                    status: {
+                        in: [
+                            BookingStatus.ACCEPTED,
+                            BookingStatus.ASSIGNING_STAFF,
+                            BookingStatus.STAFF_EN_ROUTE,
+                            BookingStatus.ARRIVED,
+                        ],
+                    },
+                },
+                orderBy: { updated_at: 'desc' },
+                take: 20,
+                select: {
+                    id: true,
+                    status: true,
+                    staff_id: true,
+                    staff_name: true,
+                    updated_at: true,
+                },
+            });
+            for (const booking of recent) {
+                res.write(
+                    `event: booking.staff_assigned\ndata: ${JSON.stringify({
+                        bookingId: booking.id,
+                        status: booking.status,
+                        staffId: booking.staff_id,
+                        staffName: booking.staff_name,
+                        assignedAt: booking.updated_at.toISOString(),
+                        replay: true,
+                    })}\n\n`,
+                );
+            }
+        } catch (e) {
+            console.error('[sse] user replay failed', e);
+        }
+
+        const heartbeat = setInterval(() => {
+            try {
+                res.write(': ping\n\n');
+            } catch {
+                /* eviction happens on close */
+            }
+        }, HEARTBEAT_MS());
+
+        const client: SseClient = { res, heartbeat };
+        addUserClient(userId, client);
+
+        req.on('close', () => {
+            removeUserClient(userId, client);
+        });
+    };
 
     list = async (req: express.Request, res: express.Response) => {
         const userId = uid(req);

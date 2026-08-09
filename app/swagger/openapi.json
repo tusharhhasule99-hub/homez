@@ -1963,6 +1963,43 @@
         }
       }
     },
+    "/bookings/stream": {
+      "get": {
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Live booking notifications (SSE)",
+        "description": "Long-lived **Server-Sent Events** stream the user app holds open to receive booking updates in real time (especially staff assignment). On connect, recently assigned in-progress bookings are replayed so a reconnecting app does not miss an assignment. A heartbeat comment (`: ping`) is sent periodically to keep the connection alive.\n\n**Auth:** `Authorization: Bearer <user JWT>` (native `EventSource` cannot set headers — use a fetch-based SSE client / polyfill).\n\n**Events**\n- `booking.staff_assigned` — staff was assigned to a booking (auto-dispatch accept or admin assign). Data: `{ bookingId, status, staffId, staffName, assignedAt, replay? }`.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE stream opened",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "example": "event: booking.staff_assigned\ndata: {\"bookingId\":\"...\",\"status\":\"ACCEPTED\",\"staffId\":\"...\",\"staffName\":\"Riya\",\"assignedAt\":\"2026-08-09T07:00:00.000Z\"}\n\n"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/bookings": {
       "get": {
         "tags": [

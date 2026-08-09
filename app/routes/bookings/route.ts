@@ -5,6 +5,7 @@ const router = express.Router();
 const controller = new bookingController();
 
 router.get('/', controller.list);
+router.get('/stream', controller.stream);
 router.post('/', controller.create);
 router.post('/:id/coupon', controller.applyCoupon);
 router.patch('/:id/status', controller.updateStatus);

@@ -7,7 +7,7 @@
 import type { Prisma } from '../../../generated/prisma/client';
 import { BookingStatus, JobOfferStatus } from '../../../generated/prisma/enums';
 import { prisma } from '../../../utils/prisma';
-import { sendToStaff } from '../../../realtime/sseRegistry';
+import { sendToStaff, sendToUser } from '../../../realtime/sseRegistry';
 
 // ---- Config (read env lazily, matching the rest of the codebase) ----
 
@@ -176,7 +176,10 @@ export async function acceptOffer(
         }
 
         const result = await prisma.$transaction(async (tx) => {
-            const offer = await tx.jobOffer.findUnique({ where: { id: offerId } });
+            const offer = await tx.jobOffer.findUnique({
+                where: { id: offerId },
+                include: { booking: { select: { user_id: true } } },
+            });
             if (!offer || offer.staff_id !== staffId) {
                 return { code: 'NOT_FOUND' as const };
             }
@@ -217,6 +220,7 @@ export async function acceptOffer(
             return {
                 code: 'OK' as const,
                 bookingId: offer.booking_id,
+                userId: offer.booking.user_id,
                 loserIds: losers.map((l) => l.staff_id),
             };
         });
@@ -235,6 +239,15 @@ export async function acceptOffer(
         for (const loserId of result.loserIds) {
             sendToStaff(loserId, 'job.expired', { bookingId: result.bookingId });
         }
+
+        // Notify the booking owner that staff was assigned.
+        sendToUser(result.userId, 'booking.staff_assigned', {
+            bookingId: result.bookingId,
+            status: BookingStatus.ACCEPTED,
+            staffId,
+            staffName: staff.name,
+            assignedAt: new Date().toISOString(),
+        });
 
         return { success: true, data: { bookingId: result.bookingId } };
     } catch (e) {
